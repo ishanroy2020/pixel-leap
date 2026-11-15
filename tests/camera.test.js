@@ -55,13 +55,35 @@ test("reset clamps at the right edge", () => {
   assert.equal(cam.x, LEVEL_W - VIEW.w);
 });
 
-test("within 2 px of a fixed target after 0.5 s", () => {
+// Target for a camera whose lookahead is still at rest (createCamera look = 0).
+function restingTarget(p, view, levelW) {
+  return Math.max(0, Math.min(levelW - view.w, p.x + p.w / 2 - 0.42 * view.w));
+}
+
+test("eases toward a distant target instead of jumping to it", () => {
+  // Created at rest (x = 0) and never reset(), so the target stays ~424 px away
+  // and update() has to close the gap itself. Facing left keeps the lookahead
+  // easing negative, so the target recedes by less than the chase closes per
+  // step and the 0.5 s check measures convergence rather than a moving goal.
   const cam = createCamera();
-  const p = playerAt(500);
-  // reset() settles the lookahead so the target stops moving.
-  reset(cam, p, VIEW, LEVEL_W);
-  run(cam, p, VIEW, LEVEL_W, 1 / 60, 30);
+  const p = playerAt(500, -1);
   const goal = steadyTarget(p, VIEW, LEVEL_W);
+  assert.ok(
+    restingTarget(p, VIEW, LEVEL_W) - cam.x >= 100,
+    "player is not far enough right to test easing",
+  );
+
+  update(cam, p, VIEW, LEVEL_W, 1 / 60);
+  assert.ok(
+    cam.x > 0 && cam.x < restingTarget(p, VIEW, LEVEL_W),
+    `first step did not move towards the target: ${cam.x}`,
+  );
+  assert.ok(
+    Math.abs(goal - cam.x) > 50,
+    `first step jumped within 50 px of the target: ${cam.x}`,
+  );
+
+  run(cam, p, VIEW, LEVEL_W, 1 / 60, 29);
   assert.ok(Math.abs(cam.x - goal) < 2, `off by ${Math.abs(cam.x - goal)}`);
 });
 

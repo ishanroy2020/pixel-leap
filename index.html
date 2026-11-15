@@ -34,7 +34,7 @@
     height: 100%;
     margin: 0;
     padding: 0;
-    background: #000;
+    background: #4aa8ff;
     overflow: hidden;
     touch-action: none;
     overscroll-behavior: none;
@@ -50,7 +50,7 @@
     display: block;
     width: 100%;
     height: 100%;
-    background: #000;
+    background: #4aa8ff;
     image-rendering: pixelated;
     touch-action: none;
     -webkit-touch-callout: none;
@@ -74,6 +74,8 @@
 <body>
 <canvas id="game"></canvas>
 <div id="safe-area" aria-hidden="true"></div>
+<script src="view.js"></script>
+<script src="camera.js"></script>
 <script src="game.js"></script>
 <script src="audio.js"></script>
 <script src="controls.js"></script>
@@ -87,7 +89,7 @@
   var canvas = document.getElementById("game");
   var ctx = canvas.getContext("2d", { alpha: false });
 
-  var view = { width: 320, height: VIEW_H, scale: 1, offX: 0, offY: 0, pxW: 320, pxH: 240, portrait: false, dpr: 1 };
+  var view = { width: 320, height: VIEW_H, S: 1, offX: 0, offY: 0, pxW: 320, pxH: 240, bandPx: 240, portrait: false, dpr: 1 };
 
   var safeProbe = document.getElementById("safe-area");
   var layout = null;
@@ -104,6 +106,8 @@
   }
 
   var ctl = PixelControls.createControls(PixelControls.layout(320, 240, safeInsets()));
+  var debugLevel = (function () { var raw = new URLSearchParams(location.search).get("level"); var n = raw === null ? 0 : Number(raw); if (!isFinite(n)) n = 0; return Math.max(0, Math.min(PixelLeap.LEVELS.length - 1, Math.floor(n))); })();
+  var debugBig = new URLSearchParams(location.search).get("big") === "1";
 
   const audio = PixelAudio.createAudio({ muted: PixelScreens.loadMuted() });
 
@@ -119,28 +123,24 @@
     view.pxH = Math.max(1, Math.round(cssH * dpr));
     canvas.width = view.pxW;
     canvas.height = view.pxH;
-    /* Internal resolution: 15 tile rows tall; width follows the aspect ratio but never below 240. */
-    view.width = Math.max(240, Math.round(VIEW_H * (cssW / cssH)));
-    view.portrait = view.width <= VIEW_H;
-    if (view.portrait) {
-      /* Portrait: a 240x240 game view pinned below the top safe-area inset; the black band
-         underneath stays empty for the stage 2 touch buttons. */
-      view.width = VIEW_H;
-      view.scale = view.pxW / VIEW_H;
-      var insetTop = parseFloat(window.getComputedStyle(document.body).paddingTop) || 0;
-      view.offY = Math.min(Math.round(insetTop * dpr), Math.max(0, Math.round(view.pxH - VIEW_H * view.scale)));
-    } else {
-      /* Landscape: width follows the window aspect ratio, letterboxed vertically and centred. */
-      view.scale = Math.max(1, Math.floor(view.pxH / VIEW_H));
-      view.offY = Math.floor((view.pxH - VIEW_H * view.scale) / 2);
-    }
-    view.offX = Math.floor((view.pxW - view.width * view.scale) / 2);
-    if (state) state.viewWidth = view.width;
+    var sized = PixelView.compute(view.pxW, view.pxH, dpr, safe);
+    view.S = sized.S;
+    view.width = sized.w;
+    view.height = sized.h;
+    view.offX = sized.offX;
+    view.offY = sized.offY;
+    view.bandPx = sized.bandPx;
+    view.portrait = sized.portrait;
+    if (state) { state.viewWidth = view.width; PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width); }
     ctx.imageSmoothingEnabled = false;
   }
 
   var state = null;
   var clock = 0;
+  var renderCamera = PixelCamera.createCamera();
+  var previous = null;
+  var hitStop = 0;
+  var renderCamX = 0;
 
   function theme() {
     return (PixelLeap.LEVELS[state.level] || { theme: "meadow" }).theme;
@@ -350,7 +350,7 @@
     }
   }
   function drawTiles() {
-    var cam = state.camera.x;
+    var cam = renderCamX;
     var t0 = Math.max(0, Math.floor(cam / TILE) - 1);
     var t1 = Math.min(state.width - 1, Math.ceil((cam + view.width) / TILE));
     for (var ty = 0; ty < state.height; ty++) {
@@ -492,11 +492,12 @@
     }
   }
   function onScreen(x, pad) {
-    var cam = state.camera.x;
+    var cam = renderCamX;
     return x - cam > -pad && x - cam < view.width + pad;
   }
   function drawEntities(skipPlayer) {
-    var cam = state.camera.x;
+    var cam = renderCamX;
+    var interp = previous ? PixelCamera.blend(previous, PixelCamera.capture(state), Math.max(0, Math.min(1, acc / STEP))) : PixelCamera.capture(state);
     var i;
     for (i = 0; i < state.gemList.length; i++) {
       var gm = state.gemList[i];
@@ -504,22 +505,22 @@
       gemSprite(gm.x - cam, gm.y);
     }
     for (i = 0; i < state.items.length; i++) {
-      var it = state.items[i];
-      if (!onScreen(it.x, 20)) continue;
-      sproutSprite(it.x - cam, it.y);
+      var it = state.items[i]; var ip = interp.items[i] || it;
+      if (!onScreen(ip.x, 20)) continue;
+      sproutSprite(PixelCamera.snap(ip.x - cam, view.S), PixelCamera.snap(ip.y, view.S));
     }
     for (i = 0; i < state.enemies.length; i++) {
-      var e = state.enemies[i];
-      if (!e.alive || !onScreen(e.x, 28)) continue;
-      if (e.kind === "buzzer") buzzerSprite(e.x - cam, e.y, e);
-      else grumbleSprite(e.x - cam, e.y, e);
+      var e = state.enemies[i]; var ep = interp.enemies[i] || e;
+      if (!e.alive || !onScreen(ep.x, 28)) continue;
+      if (e.kind === "buzzer") buzzerSprite(PixelCamera.snap(ep.x - cam, view.S), PixelCamera.snap(ep.y, view.S), e);
+      else grumbleSprite(PixelCamera.snap(ep.x - cam, view.S), PixelCamera.snap(ep.y, view.S), e);
     }
     if (skipPlayer) return;
-    var p = state.player;
+    var p = state.player; var pp = interp.player;
     var frameIdx = 1;
     if (p.onGround && Math.abs(p.vx) > 8) frameIdx = Math.floor(clock * 9) % 2 === 0 ? 0 : 2;
-    var px = Math.round(p.x - cam);
-    var py = Math.round(p.y);
+    var px = Math.round(PixelCamera.snap(pp.x - cam, view.S));
+    var py = Math.round(PixelCamera.snap(pp.y, view.S));
     if (p.invuln > 0 && Math.floor(clock * 12) % 2 === 0) return;
     blit(pipRows(p.onGround ? frameIdx : 1, p.big, !p.onGround), px, py, PAL_PIP, p.facing < 0);
   }
@@ -562,7 +563,7 @@
     var topY = 4;
     var midY = 16;
     if (ctl.touchActive() && layout) {
-      var muteLeft = (layout.mute.x * view.dpr - view.offX) / view.scale;
+      var muteLeft = (layout.mute.x * view.dpr - view.offX) / view.S;
       ctx.save();
       ctx.font = "8px " + FONT;
       var need = Math.max(
@@ -573,7 +574,7 @@
       if (muteLeft - 4 - need >= 4) {
         rx = muteLeft - 4;
       } else {
-        var below = Math.round(((layout.mute.y + layout.mute.h) * view.dpr - view.offY) / view.scale) + 4;
+        var below = Math.round(((layout.mute.y + layout.mute.h) * view.dpr - view.offY) / view.S) + 4;
         topY = below;
         midY = below + 12;
       }
@@ -593,14 +594,23 @@
   function drainEvents() {
     var q = state.events;
     audio.playEvents(q);
-    for (var i = 0; i < q.length; i++) events.push(q[i]);
+    for (var i = 0; i < q.length; i++) {
+      events.push(q[i]);
+      if (q[i] === "stomp") hitStop = Math.max(hitStop, 0.06);
+      else if (q[i] === "hurt") hitStop = Math.max(hitStop, 0.08);
+      else if (q[i] === "die") hitStop = Math.max(hitStop, 0.12);
+    }
     q.length = 0;
     /* stage 2b reads this queue for sound effects; keep it bounded */
     if (events.length > 64) events.splice(0, events.length - 64);
   }
   function newGame() {
-    state = PixelLeap.createGame({ level: 0, lives: 3 });
+    state = PixelLeap.createGame({ level: debugLevel, lives: 3 });
+    if (debugBig) state.player.big = true;
     state.viewWidth = view.width;
+    PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width);
+    previous = PixelCamera.capture(state);
+    hitStop = 0;
     acc = 0;
     events.length = 0;
     drainEvents();
@@ -611,11 +621,18 @@
 
   function draw() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = "#000000";
+    ctx.fillStyle = "#4aa8ff";
     ctx.fillRect(0, 0, view.pxW, view.pxH);
-    ctx.setTransform(view.scale, 0, 0, view.scale, view.offX, view.offY);
+    var activeTheme = THEME[theme()] || THEME.meadow;
+    if (view.portrait && view.bandPx < view.pxH) {
+      var panel = ctx.createLinearGradient(0, view.bandPx, 0, view.pxH);
+      panel.addColorStop(0, activeTheme.dirt); panel.addColorStop(1, activeTheme.dark);
+      ctx.fillStyle = panel; ctx.fillRect(0, view.bandPx, view.pxW, view.pxH - view.bandPx);
+      ctx.fillStyle = activeTheme.topHi; ctx.fillRect(0, view.bandPx, view.pxW, Math.max(1, view.S));
+    }
+    ctx.setTransform(view.S, 0, 0, view.S, view.offX, view.offY);
     ctx.imageSmoothingEnabled = false;
-    /* Keep every layer (backdrop included) inside the game view rectangle. */
+    /* Keep world layers inside the play band. */
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, view.width, view.height);
@@ -643,9 +660,12 @@
     );
   }
   function drawScene() {
-    drawBackdrop(theme(), state.camera.x);
+    drawBackdrop(theme(), renderCamX);
+    ctx.save();
+    ctx.translate(0, view.height - VIEW_H);
     drawTiles();
     drawEntities(flow.screen === "title");
+    ctx.restore();
     if (flow.screen !== "title") hud();
     /* Screen flow overlays (title / paused / clear / game over / won) in game px. */
     PixelScreens.drawScreen(
@@ -683,14 +703,20 @@
       var act = { action: ctl.consumeAction(), pause: ctl.consumePause() };
       var result = flow.update(state ? state.mode : "playing", elapsed, act);
       if (result === "restart") {
-        if (state) PixelLeap.restart(state);
-        else newGame();
+        if (flow.entered === "playing" || !state) newGame();
+        else {
+          PixelLeap.restart(state);
+          previous = PixelCamera.capture(state);
+          PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width);
+        }
         drainEvents();
         acc = 0;
         audio.setMusic((PixelLeap.LEVELS[state.level] || { theme: "meadow" }).theme);
       } else if (result === "nextLevel") {
         if (state) {
           PixelLeap.nextLevel(state);
+          previous = PixelCamera.capture(state);
+          PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width);
           drainEvents();
           acc = 0;
           audio.setMusic((PixelLeap.LEVELS[state.level] || { theme: "meadow" }).theme);
@@ -710,7 +736,17 @@
         acc += elapsed;
         var guard = 0;
         while (acc >= STEP && guard < 10) {
+          if (hitStop > 0) { hitStop = Math.max(0, hitStop - STEP); acc -= STEP; guard++; continue; }
+          previous = PixelCamera.capture(state);
+          var beforePlayer = { x: state.player.x, y: state.player.y };
+          var entityCount = state.enemies.length + state.items.length;
           PixelLeap.step(state, playerInput, Math.min(STEP, MAX_DT));
+          PixelCamera.update(renderCamera, state.player, { w: view.width }, state.width, STEP);
+          if (entityCount !== state.enemies.length + state.items.length) previous = PixelCamera.capture(state);
+          if (state.events.indexOf("die") !== -1 || Math.abs(state.player.x - beforePlayer.x) > 32 || Math.abs(state.player.y - beforePlayer.y) > 32) {
+            previous = PixelCamera.capture(state);
+            PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width);
+          }
           drainEvents();
           acc -= STEP;
           guard++;
@@ -718,6 +754,7 @@
         if (guard >= 10) acc = 0;
       }
     }
+    if (state) renderCamX = PixelCamera.snap(renderCamera.x, view.S);
     audio.update();
     draw();
     requestAnimationFrame(frame);

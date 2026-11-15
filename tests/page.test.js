@@ -7,7 +7,7 @@ test("page has the required mobile metadata, assets, scripts and rendering rules
   assert.match(html,/<link\s+rel=["']apple-touch-icon["'][^>]*icon-180\.png/i);
   assert.match(html,/<meta\s+property=["']og:image["']\s+content=["']https:\/\/ishanroy2020\.github\.io\/pixel-leap\/og\.png/i);
   const scripts=[...html.matchAll(/<script\s+src=["']([^"']+)["']/g)].map(x=>x[1]);
-  const expected=["game.js","audio.js","controls.js","screens.js","camera.js","view.js"];
+  const expected=["game.js","audio.js","controls.js","screens.js","camera.js","view.js","sprites.js","anim.js"];
   let prior=-1;
   for(const f of expected){ const i=scripts.indexOf(f); assert.ok(i>prior,`${f} is loaded in required order`); assert.ok(fs.existsSync(path.join(__dirname,"..",f)),`${f} exists`); prior=i; }
   assert.ok(html.indexOf("<script>")>html.indexOf('src="view.js"'));

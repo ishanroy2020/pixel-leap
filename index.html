@@ -80,6 +80,8 @@
 <script src="screens.js"></script>
 <script src="camera.js"></script>
 <script src="view.js"></script>
+<script src="sprites.js"></script>
+<script src="anim.js"></script>
 <script>
 "use strict";
 (function () {
@@ -165,55 +167,22 @@
     }
     ctx.drawImage(cached,gx,gy);
   }
-  var PAL_PIP = { T: "#2fd8c8", D: "#0f7f7a", W: "#ffffff", B: "#101623", O: "#ff8a2b", Y: "#c95f12" };
+  var pipBakeCache=PixelSprites.createCache(function(w,h){var c=document.createElement("canvas");c.width=w;c.height=h;return c;});
+  var pipAnimator=PixelAnim.createPipAnimator(Math.random), pipShadow=null;
   var PAL_ROCK = { R: "#8d97a8", D: "#4a5364", L: "#c2cad8", E: "#1b2130", M: "#2b3342" };
   var PAL_FLY = { Y: "#f5d43c", D: "#3a2f10", W: "#e9f6ff", K: "#1b2130" };
   var PAL_LEAF = { G: "#5fd24a", D: "#21701f", L: "#a5ef7a", K: "#8a5a2b" };
 
-  /* Pip: round teal body, big white eyes, long orange scarf (drawn from below upward). */
-  var PIP_HEAD = [
-    "....DDDD....",
-    "..DDTTTTDD..",
-    ".DTTTTTTTTD.",
-    "DTTWWTTWWTTD",
-    "DTTWWTTWWTTD",
-    "DTTBWTTTBWTD",
-    "DOOOOOOOOOOD",
-    "DYOOOOOOOOYD"
-  ];
-  var PIP_BODY = [
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD."
-  ];
-  var PIP_TORSO_BIG = [
-    ".DTTTTTTTTD.",
-    "DTTTTTTTTTTD",
-    "DTTTTTTTTTTD",
-    "DTTTTTTTTTTD",
-    "DTTTTTTTTTTD",
-    "DOOOOOOOOOOD",
-    "DYOOOOOOOOYD",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD."
-  ];
-  var LEG_STAND = ["DDTTDDDDTTDD", ".DDD.DD.DDD."];
-  var LEG_RUN = ["DDTTDDDDTTDD", "DDD.DDDD.DDD"];
-  var LEG_RUN2 = ["DDTTDDDDTTDD", ".DDDDDDDDDD."];
-  var LEG_TUCK = ["DDTTDDDDTTDD", "DD.DD..DD.DD"];
-  var PIP_LEGS = [LEG_RUN, LEG_STAND, LEG_RUN2];
-  var PIP_SMALL_TOP = PIP_HEAD.concat(PIP_BODY);
-  var PIP_BIG_TOP = PIP_HEAD.concat(PIP_TORSO_BIG);
-  function pipRows(frame, big, tuck) {
-    var top = big ? PIP_BIG_TOP : PIP_SMALL_TOP;
-    var legs = tuck ? LEG_TUCK : PIP_LEGS[frame % PIP_LEGS.length];
-    return top.concat(legs);
+  function drawPipSprite(p,pp,cam){
+    var pose=pipAnimator.update(p,null,Math.min(.05,acc||0),events,p.mode||state.mode), big=!!p.big, h=big?28:18;
+    var px=PixelCamera.snap(pp.x-cam+((p.w||12)-16)/2,view.S), py=PixelCamera.snap(pp.y+(p.h||14)-h,view.S);
+    var ground=Math.max(0,Math.min(1,(p.y+p.h-(pp.y+pp.h||p.y+p.h))/18));
+    if(!pipShadow){pipShadow=document.createElement('canvas');pipShadow.width=32;pipShadow.height=10;var sc=pipShadow.getContext('2d'),g=sc.createRadialGradient(16,5,1,16,5,15);g.addColorStop(0,'rgba(0,0,0,.25)');g.addColorStop(1,'rgba(0,0,0,0)');sc.fillStyle=g;sc.fillRect(0,0,32,10);}
+    ctx.globalAlpha=1;ctx.drawImage(pipShadow,PixelCamera.snap(pp.x-cam-4,view.S),PixelCamera.snap(p.y+p.h-2+ground*5,view.S),24,7);
+    ctx.save();ctx.translate(px+8,py+h);ctx.scale((p.facing<0?-1:1)*Math.round(pose.sx*16)/16,Math.round(pose.sy*16)/16);ctx.translate(-8,-h);
+    var frameCanvas=pipBakeCache.get(pose.name,pose.frame,big);ctx.drawImage(frameCanvas,0,0);ctx.restore();
+    ctx.fillStyle=PixelSprites.PAL.S;
+    for(var j=0;j<6;j++){var pt=pose.scarf[j],tx=PixelCamera.snap(pt.x-cam,1),ty=PixelCamera.snap(pt.y,1);ctx.fillStyle=j<4?PixelSprites.PAL.S:PixelSprites.PAL.Q;ctx.fillRect(tx,ty,Math.max(1,2-Math.floor(j/3)),2);}
   }
   var LIFE_ICON = ["DDD.DDD", "DWWDWWD", "DWWWWWD", "DWWWWWD", ".DDDDD.", "..DDD..", "...D..."];
 
@@ -571,12 +540,8 @@
     }
     if (skipPlayer) return;
     var p = state.player; var pp = interp.player;
-    var frameIdx = 1;
-    if (p.onGround && Math.abs(p.vx) > 8) frameIdx = Math.floor(clock * 9) % 2 === 0 ? 0 : 2;
-    var px = PixelCamera.snap(pp.x - cam, view.S);
-    var py = PixelCamera.snap(pp.y, view.S);
     if (p.invuln > 0 && Math.floor(clock * 12) % 2 === 0) return;
-    blit(pipRows(p.onGround ? frameIdx : 1, p.big, !p.onGround), px, py, PAL_PIP, p.facing < 0);
+    drawPipSprite(p,pp,cam);
   }
   function grumbleSprite(gx, gy, e) {
     blit(ROCK, gx, gy, PAL_ROCK, e.vx > 0);

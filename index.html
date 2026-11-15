@@ -543,9 +543,30 @@
     for (var i = 0; i < Math.min(state.lives, 6); i++) {
       blit(LIFE_ICON, 5 + i * 9, 27, { D: "#0f7f7a", W: "#2fd8c8" }, false);
     }
+    /* With the touch buttons on screen they sit over the top-right corner, so
+       the right-hand block moves left of mute — or below it when too narrow. */
     var rx = view.width - 4;
-    text("TIME " + mm + ":" + ss, rx, 16, 8, t <= 30 ? "#ff8a7a" : "#ffffff", "right");
-    text(name.toUpperCase() + " " + (state.level + 1) + "/3", rx, 4, 8, "#ffe66a", "right");
+    var topY = 4;
+    var midY = 16;
+    if (ctl.touchActive() && layout) {
+      var muteLeft = (layout.mute.x * view.dpr - view.offX) / view.scale;
+      ctx.save();
+      ctx.font = "8px " + FONT;
+      var need = Math.max(
+        ctx.measureText("TIME " + mm + ":" + ss).width,
+        ctx.measureText(name.toUpperCase() + " " + (state.level + 1) + "/3").width
+      );
+      ctx.restore();
+      if (muteLeft - 4 - need >= 4) {
+        rx = muteLeft - 4;
+      } else {
+        var below = Math.round(((layout.mute.y + layout.mute.h) * view.dpr - view.offY) / view.scale) + 4;
+        topY = below;
+        midY = below + 12;
+      }
+    }
+    text("TIME " + mm + ":" + ss, rx, midY, 8, t <= 30 ? "#ff8a7a" : "#ffffff", "right");
+    text(name.toUpperCase() + " " + (state.level + 1) + "/3", rx, topY, 8, "#ffe66a", "right");
   }
   function overlayScreen(lines) {
     ctx.fillStyle = "rgba(6, 8, 20, 0.72)";
@@ -730,6 +751,13 @@
 
   resize();
   requestAnimationFrame(frame);
+
+  /* Read-only handle for headless verification. */
+  window.__pixelLeap = {
+    get state() { return state; },
+    get screen() { return screen; },
+    get paused() { return paused; }
+  };
 })();
 </script>
 </body>

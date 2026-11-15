@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pixel Leap">
+<meta name="theme-color" content="#000000">
+<meta name="description" content="Pixel Leap - an original retro browser platformer.">
+<title>Pixel Leap</title>
+<style>
+  @font-face {
+    font-family: "Press Start 2P";
+    src: url("fonts/press-start-2p.woff2") format("woff2");
+    font-weight: normal;
+    font-style: normal;
+    font-display: block;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background: #000;
+    overflow: hidden;
+    touch-action: none;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  #game {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    image-rendering: pixelated;
+    touch-action: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script src="game.js"></script>
+<script>
+"use strict";
+(function () {
+  var TILE = PixelLeap.TILE;
+  var VIEW_H = PixelLeap.VIEW_TILES_H * TILE; /* 240 internal pixels tall */
+
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d", { alpha: false });
+
+  var view = { width: 320, height: VIEW_H, scale: 1, offX: 0, offY: 0, pxW: 320, pxH: 240 };
+
+  function resize() {
+    var dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
+    var cssW = Math.max(1, canvas.clientWidth || window.innerWidth || 320);
+    var cssH = Math.max(1, canvas.clientHeight || window.innerHeight || 240);
+    view.pxW = Math.max(1, Math.round(cssW * dpr));
+    view.pxH = Math.max(1, Math.round(cssH * dpr));
+    canvas.width = view.pxW;
+    canvas.height = view.pxH;
+    /* Internal resolution: 15 tile rows tall, width follows the window aspect ratio. */
+    view.width = Math.max(96, Math.round(VIEW_H * (cssW / cssH)));
+    view.scale = Math.max(1, Math.floor(Math.min(view.pxW / view.width, view.pxH / VIEW_H)));
+    view.offX = Math.floor((view.pxW - view.width * view.scale) / 2);
+    view.offY = Math.floor((view.pxH - VIEW_H * view.scale) / 2);
+    if (state) state.viewWidth = view.width;
+    ctx.imageSmoothingEnabled = false;
+  }
+
+  var state = null;
+  var clock = 0;
+
+  function theme() {
+    return (PixelLeap.LEVELS[state.level] || { theme: "meadow" }).theme;
+  }
+  /* ---------- sprite blitting from character maps ---------- */
+  function blit(map, gx, gy, pal, flipX) {
+    var h = map.length;
+    for (var r = 0; r < h; r++) {
+      var row = map[r];
+      var w = row.length;
+      for (var c = 0; c < w; c++) {
+        var col = flipX ? (w - 1 - c) : c;
+        var fill = pal[row.charAt(col)];
+        if (!fill) continue;
+        ctx.fillStyle = fill;
+        ctx.fillRect(gx + c, gy + r, 1, 1);
+      }
+    }
+  }
+  var PAL_PIP = { T: "#2fd8c8", D: "#0f7f7a", W: "#ffffff", B: "#101623", O: "#ff8a2b", Y: "#c95f12" };
+  var PAL_ROCK = { R: "#8d97a8", D: "#4a5364", L: "#c2cad8", E: "#1b2130", M: "#2b3342" };
+  var PAL_FLY = { Y: "#f5d43c", D: "#3a2f10", W: "#e9f6ff", K: "#1b2130" };
+  var PAL_LEAF = { G: "#5fd24a", D: "#21701f", L: "#a5ef7a", K: "#8a5a2b" };
+
+  /* Pip: round teal body, big white eyes, long orange scarf (drawn from below upward). */
+  var PIP_HEAD = [
+    "....DDDD....",
+    "..DDTTTTDD..",
+    ".DTTTTTTTTD.",
+    "DTTWWTTWWTTD",
+    "DTTWWTTWWTTD",
+    "DTTBWTTTBWTD",
+    "DOOOOOOOOOOD",
+    "DYOOOOOOOOYD"
+  ];
+  var PIP_BODY = [
+    ".DTTTTTTTTD.",
+    ".DTTTTTTTTD.",
+    ".DTTTTTTTTD.",
+    ".DTTTTTTTTD."
+  ];
+  var PIP_TORSO_BIG = [
+    ".DTTTTTTTTD.",
+    "DTTTTTTTTTTD",
+    "DTTTTTTTTTTD",
+    "DTTTTTTTTTTD",
+    "DTTTTTTTTTTD",
+    "DOOOOOOOOOOD",
+    "DYOOOOOOOOYD",
+    ".DTTTTTTTTD.",
+    ".DTTTTTTTTD.",
+    ".DTTTTTTTTD.",
+    ".DTTTTTTTTD.",
+    ".DTTTTTTTTD.",
+    ".DTTTTTTTTD.",
+    ".DTTTTTTTTD."
+  ];
+  var LEG_STAND = ["DDTTDDDDTTDD", ".DDD.DD.DDD."];
+  var LEG_RUN = ["DDTTDDDDTTDD", "DDD.DDDD.DDD"];
+  var LEG_RUN2 = ["DDTTDDDDTTDD", ".DDDDDDDDDD."];
+  var LEG_TUCK = ["DDTTDDDDTTDD", "DD.DD..DD.DD"];
+  var PIP_LEGS = [LEG_RUN, LEG_STAND, LEG_RUN2];
+  var PIP_SMALL_TOP = PIP_HEAD.concat(PIP_BODY);
+  var PIP_BIG_TOP = PIP_HEAD.concat(PIP_TORSO_BIG);
+  function pipRows(frame, big, tuck) {
+    var top = big ? PIP_BIG_TOP : PIP_SMALL_TOP;
+    var legs = tuck ? LEG_TUCK : PIP_LEGS[frame % PIP_LEGS.length];
+    return top.concat(legs);
+  }
+  var LIFE_ICON = ["DDD.DDD", "DWWDWWD", "DWWWWWD", "DWWWWWD", ".DDDDD.", "..DDD..", "...D..."];
+
+  var ROCK = [
+    "...DDDDDD...",
+    ".DDLLLLLLDD.",
+    "DLLLLLLLLLLD",
+    "DRLRRRRRRRRD",
+    "DRRERRRERRRD",
+    "DRMRRRRRRMRD",
+    "DRRRRRRRRRRD",
+    "DRRRLRRRRRRD",
+    "DRRRRRRLRRRD",
+    "DRRLRRRRRRRD",
+    "DRRRRRRRLRRD",
+    "DRRRRRRRRRRD",
+    ".DDRRRRRRDD.",
+    "...DDDDDD..."
+  ];
+  var FLY_DOWN = [
+    ".WW......WW.",
+    "WWWW....WWWW",
+    ".WW.YYYY.WW.",
+    "...YYYYYY...",
+    "..YDYYYYDY..",
+    "..YDYYYYDY..",
+    "...YYYYYY...",
+    "..KYYYYYYK..",
+    "...KK..KK..."
+  ];
+  var FLY_UP = [
+    "..K......K..",
+    ".KKK....KKK.",
+    "...YYYYYY...",
+    "..YDYYYYDY..",
+    "..YDYYYYDY..",
+    "...YYYYYY...",
+    "..KYYYYYYK..",
+    "...KK..KK..."
+  ];
+  var LEAF = [
+    ".....DD.....",
+    "...DLLGD....",
+    "..DLGGGGD...",
+    ".DLGGGGGGD..",
+    ".DLGGGGGGD..",
+    "DLGGDDGGGD..",
+    "DLGDGGGGGD..",
+    ".DDGGGGGDD..",
+    "..DLGGGD....",
+    "...DLGD.....",
+    "....KD......",
+    "....KD......",
+    "...KKK......",
+    "............"
+  ];
+  /* ---------- tiles ---------- */
+  var THEME = {
+    meadow: { sky: ["#3fa9f5", "#a8e0ff"], dirt: "#6b4a2f", dark: "#3f2a18", top: "#4fc240", topHi: "#8ee06a", hill: "#2f8f3a", hillFar: "#69c05a" },
+    caverns: { sky: ["#0a1030", "#161e42"], dirt: "#2c3358", dark: "#171c36", top: "#4a5aa0", topHi: "#7d8fd8", hill: "#1d2450", hillFar: "#2a3468" },
+    sky: { sky: ["#ff9a4a", "#ffd9a0"], dirt: "#6a5a86", dark: "#3b3157", top: "#c9a0ff", topHi: "#f0d8ff", hill: "#8a6ab0", hillFar: "#b98fd6" }
+  };
+  function drawTile(ch, dx, dy, tx, ty) {
+    var th = THEME[theme()] || THEME.meadow;
+    if (ch === "#") {
+      ctx.fillStyle = th.dirt;
+      ctx.fillRect(dx, dy, TILE, TILE);
+      ctx.fillStyle = th.dark;
+      if ((tx * 7 + ty * 13) % 5 === 0) ctx.fillRect(dx + 3, dy + 8, 3, 2);
+      if ((tx * 11 + ty * 5) % 4 === 0) ctx.fillRect(dx + 10, dy + 11, 3, 2);
+      ctx.fillStyle = th.top;
+      ctx.fillRect(dx, dy, TILE, 4);
+      ctx.fillStyle = th.topHi;
+      ctx.fillRect(dx, dy, TILE, 2);
+      if ((tx * 3) % 2 === 0) ctx.fillRect(dx + 2, dy + 4, 2, 2);
+      if ((tx * 5) % 3 === 0) ctx.fillRect(dx + 11, dy + 4, 2, 2);
+    } else if (ch === "B") {
+      ctx.fillStyle = "#a85a34";
+      ctx.fillRect(dx, dy, TILE, TILE);
+      ctx.fillStyle = "#d1794a";
+      ctx.fillRect(dx, dy, TILE, 2);
+      ctx.fillStyle = "#5e2f1a";
+      ctx.fillRect(dx, dy + 7, TILE, 1);
+      ctx.fillRect(dx, dy + 15, TILE, 1);
+      ctx.fillRect(dx + 7, dy + 1, 1, 6);
+      ctx.fillRect(dx + 3, dy + 8, 1, 7);
+      ctx.fillRect(dx + 11, dy + 8, 1, 7);
+    } else if (ch === "?" || ch === "P") {
+      ctx.fillStyle = "#c9971a";
+      ctx.fillRect(dx, dy, TILE, TILE);
+      ctx.fillStyle = "#f5d033";
+      ctx.fillRect(dx + 1, dy + 1, 14, 14);
+      ctx.fillStyle = "#ffe98a";
+      ctx.fillRect(dx + 1, dy + 1, 14, 2);
+      ctx.fillStyle = "#8a6300";
+      ctx.fillRect(dx + 2, dy + 12, 12, 2);
+      ctx.fillStyle = "#7a5200";
+      ctx.fillRect(dx + 2, dy + 2, 2, 2);
+      ctx.fillRect(dx + 12, dy + 2, 2, 2);
+      ctx.fillRect(dx + 2, dy + 10, 2, 2);
+      ctx.fillRect(dx + 12, dy + 10, 2, 2);
+      if (Math.floor(clock * 6 + tx + ty) % 4 === 0) {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(dx + 5, dy + 4, 2, 2);
+        ctx.fillRect(dx + 8, dy + 8, 2, 2);
+      }
+    } else if (ch === "U") {
+      ctx.fillStyle = "#7a6534";
+      ctx.fillRect(dx, dy, TILE, TILE);
+      ctx.fillStyle = "#9c8347";
+      ctx.fillRect(dx + 1, dy + 1, 14, 13);
+      ctx.fillStyle = "#5b4a24";
+      ctx.fillRect(dx + 3, dy + 3, 3, 3);
+      ctx.fillRect(dx + 10, dy + 8, 3, 3);
+    } else if (ch === "^") {
+      for (var s = 0; s < 4; s++) {
+        var bx = dx + s * 4;
+        ctx.fillStyle = "#9aa6b8";
+        ctx.fillRect(bx + 1, dy + 4, 2, 12);
+        ctx.fillRect(bx, dy + 9, 4, 7);
+        ctx.fillStyle = "#d6deea";
+        ctx.fillRect(bx + 1, dy + 4, 1, 6);
+      }
+      ctx.fillStyle = "#5c6675";
+      ctx.fillRect(dx, dy + 14, TILE, 2);
+    } else if (ch === "F") {
+      var pulse = 0.5 + 0.5 * Math.sin(clock * 4);
+      ctx.fillStyle = "rgba(255,230,106," + (0.18 + 0.3 * pulse).toFixed(2) + ")";
+      ctx.fillRect(dx - 4, dy - 6, 24, 26);
+      ctx.fillStyle = "#4a5568";
+      ctx.fillRect(dx + 6, dy, 4, TILE);
+      ctx.fillStyle = "#8fa3c0";
+      ctx.fillRect(dx + 6, dy, 2, TILE);
+      ctx.fillStyle = "#ffe66a";
+      ctx.fillRect(dx + 4, dy - 11, 8, 8);
+      ctx.fillRect(dx + 1, dy - 8, 14, 2);
+      ctx.fillStyle = "#fff8d0";
+      ctx.fillRect(dx + 6, dy - 9, 4, 4);
+    }
+  }
+  function drawTiles() {
+    var cam = state.camera.x;
+    var t0 = Math.max(0, Math.floor(cam / TILE) - 1);
+    var t1 = Math.min(state.width - 1, Math.ceil((cam + view.width) / TILE));
+    for (var ty = 0; ty < state.height; ty++) {
+      var row = state.tiles[ty];
+      for (var tx = t0; tx <= t1; tx++) {
+        var ch = row[tx];
+        if (ch === ".") continue;
+        drawTile(ch, Math.round(tx * TILE - cam), ty * TILE, tx, ty);
+      }
+    }
+  }
+  /* ---------- parallax backdrop ---------- */
+  function hill(x, y, w, h) {
+    x = Math.round(x);
+    for (var r = 0; r < h; r++) {
+      var t = r / h;
+      var half = Math.round((w / 2) * (1 - t * t));
+      ctx.fillRect(x + Math.round(w / 2) - half, y + r, half * 2, 1);
+    }
+  }
+  function cloud(x, y) {
+    x = Math.round(x);
+    y = Math.round(y);
+    ctx.fillRect(x, y + 4, 34, 7);
+    ctx.fillRect(x + 6, y, 16, 6);
+    ctx.fillRect(x + 22, y + 2, 10, 6);
+  }
+  function crystal(x, y, w, h) {
+    x = Math.round(x);
+    y = Math.round(y);
+    for (var r = 0; r < h; r++) {
+      var t = r / h;
+      var half = Math.max(1, Math.round((w / 2) * (1 - t)));
+      ctx.fillRect(x - half, y + r, half * 2, 1);
+    }
+  }
+  function spans(step, cam, rate, fn) {
+    var off = -((cam * rate + clock * 6) % step);
+    var n = Math.ceil(view.width / step) + 1;
+    for (var i = -1; i < n; i++) fn(Math.round(off + i * step), i);
+  }
+  function drawBackdrop(name, cam) {
+    var th = THEME[name] || THEME.meadow;
+    var g = ctx.createLinearGradient(0, 0, 0, view.height);
+    g.addColorStop(0, th.sky[0]);
+    g.addColorStop(1, th.sky[1]);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, view.width, view.height);
+    var base = view.height - 3 * TILE;
+    if (name === "caverns") {
+      spans(90, cam, 0.15, function (x, i) {
+        var glow = (0.3 + 0.22 * Math.sin(clock * 2 + i)).toFixed(2);
+        ctx.fillStyle = "rgba(126,243,255," + glow + ")";
+        crystal(x, 26 + (i % 3) * 24, 12, 32);
+        ctx.fillStyle = "rgba(180,140,255," + glow + ")";
+        crystal(x + 40, 54 + (i % 2) * 28, 8, 24);
+      });
+      ctx.fillStyle = "rgba(120,140,220,0.22)";
+      spans(70, cam, 0.3, function (x) {
+        ctx.fillRect(x, base + 18, 26, 6);
+      });
+      ctx.fillStyle = "rgba(60,70,130,0.5)";
+      spans(64, cam, 0.45, function (x) {
+        ctx.fillRect(x, view.height - 2 * TILE, 30, 2 * TILE);
+      });
+    } else if (name === "sky") {
+      var sx = Math.round(view.width * 0.66 - cam * 0.05);
+      var sy = Math.round(view.height * 0.34);
+      ctx.fillStyle = "rgba(255,247,214,0.95)";
+      ctx.fillRect(sx - 14, sy - 14, 28, 28);
+      ctx.fillStyle = "rgba(255,120,60,0.30)";
+      ctx.fillRect(sx - 24, sy - 4, 48, 10);
+      ctx.fillStyle = "rgba(255,170,90,0.35)";
+      for (var b = 0; b < 4; b++) ctx.fillRect(0, sy + 16 + b * 14, view.width, 4);
+      spans(150, cam, 0.18, function (x, i) {
+        var lift = (i % 2) * 20;
+        ctx.fillStyle = th.hillFar;
+        ctx.fillRect(x, base - 8 + lift, 58, 10);
+        ctx.fillStyle = th.hill;
+        ctx.fillRect(x + 6, base + lift, 46, 8);
+        ctx.fillStyle = "rgba(255,255,255,0.35)";
+        ctx.fillRect(x + 6, base + lift, 46, 2);
+      });
+      ctx.fillStyle = "rgba(255,225,190,0.45)";
+      spans(170, cam, 0.1, function (x, i) {
+        cloud(x, 20 + (i % 2) * 18);
+      });
+    } else {
+      ctx.fillStyle = "rgba(255,252,225,0.9)";
+      var mx = Math.round(view.width * 0.2 - cam * 0.04);
+      ctx.fillRect(mx, 18, 18, 18);
+      spans(160, cam, 0.2, function (x, i) {
+        ctx.fillStyle = th.hillFar;
+        hill(x - 20, base + 6 + (i % 2) * 8, 96, 38);
+      });
+      spans(120, cam, 0.4, function (x, i) {
+        ctx.fillStyle = th.hill;
+        hill(x, base + 22 + (i % 3) * 6, 68, 28);
+      });
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      spans(140, cam, 0.12, function (x, i) {
+        cloud(x, 24 + (i % 3) * 16);
+      });
+    }
+  }
+  /* ---------- entities ---------- */
+  function gemSprite(cx, cy) {
+    var w = 3 + Math.abs(Math.sin(clock * 3.2)) * 7;
+    var h = 10;
+    var gx = Math.round(cx - w / 2);
+    var gy = Math.round(cy - h / 2);
+    ctx.fillStyle = "#0d5f72";
+    ctx.fillRect(gx, gy, Math.max(2, Math.round(w)), h);
+    ctx.fillStyle = "#7ef3ff";
+    ctx.fillRect(gx + 1, gy + 1, Math.max(1, Math.round(w) - 2), h - 3);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(gx + 1, gy + 2, Math.max(1, Math.round(w / 3)), 2);
+  }
+  function onScreen(x, pad) {
+    var cam = state.camera.x;
+    return x - cam > -pad && x - cam < view.width + pad;
+  }
+  function drawEntities() {
+    var cam = state.camera.x;
+    var i;
+    for (i = 0; i < state.gemList.length; i++) {
+      var gm = state.gemList[i];
+      if (gm.taken || !onScreen(gm.x, 20)) continue;
+      gemSprite(gm.x - cam, gm.y);
+    }
+    for (i = 0; i < state.items.length; i++) {
+      var it = state.items[i];
+      if (!onScreen(it.x, 20)) continue;
+      sproutSprite(it.x - cam, it.y);
+    }
+    for (i = 0; i < state.enemies.length; i++) {
+      var e = state.enemies[i];
+      if (!e.alive || !onScreen(e.x, 28)) continue;
+      if (e.kind === "buzzer") buzzerSprite(e.x - cam, e.y, e);
+      else grumbleSprite(e.x - cam, e.y, e);
+    }
+    var p = state.player;
+    var frameIdx = 1;
+    if (p.onGround && Math.abs(p.vx) > 8) frameIdx = Math.floor(clock * 9) % 2 === 0 ? 0 : 2;
+    var px = Math.round(p.x - cam);
+    var py = Math.round(p.y);
+    if (p.invuln > 0 && Math.floor(clock * 12) % 2 === 0) return;
+    blit(pipRows(p.onGround ? frameIdx : 1, p.big, !p.onGround), px, py, PAL_PIP, p.facing < 0);
+  }
+  function grumbleSprite(gx, gy, e) {
+    blit(ROCK, Math.round(gx), Math.round(gy), PAL_ROCK, e.vx > 0);
+  }
+  function buzzerSprite(gx, gy, e) {
+    var flap = Math.sin((e.t || 0) * Math.PI * 2 / 0.28) > 0;
+    blit(flap ? FLY_DOWN : FLY_UP, Math.round(gx), Math.round(gy) + (flap ? 0 : 5), PAL_FLY, false);
+  }
+  function sproutSprite(gx, gy) {
+    blit(LEAF, Math.round(gx), Math.round(gy), PAL_LEAF, false);
+  }
+
+  /* ---------- HUD and overlays ---------- */
+  var FONT = String.fromCharCode(34) + "Press Start 2P" + String.fromCharCode(34) + ", monospace";
+  function text(str, gx, gy, size, color, align) {
+    ctx.save();
+    ctx.fillStyle = color || "#ffffff";
+    ctx.font = size + "px " + FONT;
+    ctx.textAlign = align || "left";
+    ctx.textBaseline = "top";
+    ctx.fillText(str, Math.round(gx), Math.round(gy));
+    ctx.restore();
+  }
+  function center(str, gy, size, color) {
+    text(str, view.width / 2, gy, size, color, "center");
+  }
+  function hud() {
+    var name = (PixelLeap.LEVELS[state.level] || { name: "?" }).name;
+    var t = Math.max(0, Math.ceil(state.time));
+    var mm = Math.floor(t / 60);
+    var ss = ("0" + (t % 60)).slice(-2);
+    text("SCORE " + state.score, 4, 4, 8, "#ffffff");
+    text("GEM " + state.gems, 4, 16, 8, "#7ef3ff");
+    var rx = view.width - 4;
+    text("TIME " + mm + ":" + ss, rx, 16, 8, t <= 30 ? "#ff8a7a" : "#ffffff", "right");
+    text(name.toUpperCase() + " " + (state.level + 1) + "/3", rx, 4, 8, "#ffe66a", "right");
+    for (var i = 0; i < Math.min(state.lives, 6); i++) {
+      blit(LIFE_ICON, 5 + i * 9, 27, { D: "#0f7f7a", W: "#2fd8c8" }, false);
+    }
+  }
+  function overlayScreen(lines) {
+    ctx.fillStyle = "rgba(6, 8, 20, 0.72)";
+    ctx.fillRect(0, 0, view.width, view.height);
+    var total = 0;
+    for (var j = 0; j < lines.length; j++) total += (lines[j].size || 8) + 8;
+    var gy = Math.round((view.height - total) / 2);
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i];
+      center(ln.s, gy, ln.size || 8, ln.color || "#ffffff");
+      gy += (ln.size || 8) + 8;
+    }
+  }
+
+  /* ---------- main loop ---------- */
+  var screen = "title";
+  var paused = false;
+  var last = 0;
+  var acc = 0;
+  var STEP = 1 / 60;
+  var MAX_DT = 1 / 30;
+  var input = { left: false, right: false, jump: false };
+  var events = [];
+
+  function drainEvents() {
+    var q = state.events;
+    for (var i = 0; i < q.length; i++) events.push(q[i]);
+    q.length = 0;
+    /* stage 2b reads this queue for sound effects; keep it bounded */
+    if (events.length > 64) events.splice(0, events.length - 64);
+  }
+  function startGame() {
+    state = PixelLeap.createGame({ level: 0, lives: 3 });
+    state.viewWidth = view.width;
+    screen = "playing";
+    paused = false;
+    acc = 0;
+    events.length = 0;
+  }
+  function pressEnter() {
+    if (screen === "title" || !state) { startGame(); return; }
+    if (state.mode === "levelclear") { PixelLeap.nextLevel(state); drainEvents(); }
+    else if (state.mode === "gameover" || state.mode === "won") { PixelLeap.restart(state); drainEvents(); }
+  }
+
+  function draw() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, view.pxW, view.pxH);
+    ctx.setTransform(view.scale, 0, 0, view.scale, view.offX, view.offY);
+    ctx.imageSmoothingEnabled = false;
+    if (screen === "title" || !state) {
+      drawBackdrop("meadow", 0);
+      blit(pipRows(1, false, false), Math.round(view.width / 2) - 6, Math.round(view.height / 2) + 22, PAL_PIP, false);
+      overlayScreen([
+        { s: "PIXEL LEAP", size: 16, color: "#7ef3ff" },
+        { s: "ARROWS OR A D  MOVE", size: 8, color: "#ffffff" },
+        { s: "SPACE OR W JUMPS", size: 8, color: "#ffffff" },
+        { s: "press Enter", size: 8, color: "#ffe66a" }
+      ]);
+      return;
+    }
+    drawBackdrop(theme(), state.camera.x);
+    drawTiles();
+    drawEntities();
+    hud();
+    if (state.mode === "levelclear") {
+      overlayScreen([
+        { s: "LEVEL CLEAR", size: 12, color: "#9dff7a" },
+        { s: "SCORE " + state.score, size: 8, color: "#ffffff" },
+        { s: "press Enter", size: 8, color: "#ffe66a" }
+      ]);
+    } else if (state.mode === "gameover") {
+      overlayScreen([
+        { s: "GAME OVER", size: 12, color: "#ff7a7a" },
+        { s: "SCORE " + state.score, size: 8, color: "#ffffff" },
+        { s: "press Enter", size: 8, color: "#ffe66a" }
+      ]);
+    } else if (state.mode === "won") {
+      overlayScreen([
+        { s: "YOU WIN!", size: 12, color: "#ffe66a" },
+        { s: "SCORE " + state.score, size: 8, color: "#ffffff" },
+        { s: "press Enter", size: 8, color: "#7ef3ff" }
+      ]);
+    }
+    if (paused) {
+      overlayScreen([
+        { s: "PAUSE", size: 12, color: "#ffffff" },
+        { s: "P RESUMES", size: 8, color: "#ffe66a" }
+      ]);
+    }
+  }
+
+  function frame(ms) {
+    var now = ms / 1000;
+    if (!last) last = now;
+    var elapsed = now - last;
+    last = now;
+    if (elapsed > 0.25) elapsed = 0.25;
+    if (document.hidden) {
+      if (screen === "playing") paused = true;
+    } else {
+      clock += elapsed;
+      acc += elapsed;
+      var guard = 0;
+      while (acc >= STEP && guard < 10) {
+        if (screen === "playing" && !paused && state) {
+          PixelLeap.step(state, input, Math.min(STEP, MAX_DT));
+          drainEvents();
+        }
+        acc -= STEP;
+        guard++;
+      }
+      if (guard >= 10) acc = 0;
+    }
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener("resize", resize);
+  window.addEventListener("orientationchange", function () { setTimeout(resize, 150); });
+  document.addEventListener("visibilitychange", function () { last = 0; acc = 0; });
+
+  function setKey(k, down, ev) {
+    if (k === "ArrowLeft" || k === "a" || k === "A") { input.left = down; return true; }
+    if (k === "ArrowRight" || k === "d" || k === "D") { input.right = down; return true; }
+    if (k === " " || k === "Spacebar" || k === "w" || k === "W" || k === "ArrowUp") { input.jump = down; return true; }
+    return false;
+  }
+  window.addEventListener("keydown", function (ev) {
+    if (setKey(ev.key, true, ev)) { ev.preventDefault(); return; }
+    var k = ev.key;
+    if (k === "p" || k === "P" || k === "Escape") {
+      if (screen === "playing") paused = !paused;
+      ev.preventDefault();
+    } else if (k === "Enter") {
+      pressEnter();
+      ev.preventDefault();
+    }
+  });
+  window.addEventListener("keyup", function (ev) {
+    if (setKey(ev.key, false, ev)) ev.preventDefault();
+  });
+  window.addEventListener("blur", function () {
+    input.left = false;
+    input.right = false;
+    input.jump = false;
+  });
+
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

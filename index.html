@@ -57,7 +57,7 @@
   var canvas = document.getElementById("game");
   var ctx = canvas.getContext("2d", { alpha: false });
 
-  var view = { width: 320, height: VIEW_H, scale: 1, offX: 0, offY: 0, pxW: 320, pxH: 240 };
+  var view = { width: 320, height: VIEW_H, scale: 1, offX: 0, offY: 0, pxW: 320, pxH: 240, portrait: false };
 
   function resize() {
     var dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
@@ -67,11 +67,22 @@
     view.pxH = Math.max(1, Math.round(cssH * dpr));
     canvas.width = view.pxW;
     canvas.height = view.pxH;
-    /* Internal resolution: 15 tile rows tall, width follows the window aspect ratio. */
-    view.width = Math.max(96, Math.round(VIEW_H * (cssW / cssH)));
-    view.scale = Math.max(1, Math.floor(Math.min(view.pxW / view.width, view.pxH / VIEW_H)));
+    /* Internal resolution: 15 tile rows tall; width follows the aspect ratio but never below 240. */
+    view.width = Math.max(240, Math.round(VIEW_H * (cssW / cssH)));
+    view.portrait = view.width <= VIEW_H;
+    if (view.portrait) {
+      /* Portrait: a 240x240 game view pinned below the top safe-area inset; the black band
+         underneath stays empty for the stage 2 touch buttons. */
+      view.width = VIEW_H;
+      view.scale = view.pxW / VIEW_H;
+      var insetTop = parseFloat(window.getComputedStyle(document.body).paddingTop) || 0;
+      view.offY = Math.min(Math.round(insetTop * dpr), Math.max(0, Math.round(view.pxH - VIEW_H * view.scale)));
+    } else {
+      /* Landscape: width follows the window aspect ratio, letterboxed vertically and centred. */
+      view.scale = Math.max(1, Math.floor(view.pxH / VIEW_H));
+      view.offY = Math.floor((view.pxH - VIEW_H * view.scale) / 2);
+    }
     view.offX = Math.floor((view.pxW - view.width * view.scale) / 2);
-    view.offY = Math.floor((view.pxH - VIEW_H * view.scale) / 2);
     if (state) state.viewWidth = view.width;
     ctx.imageSmoothingEnabled = false;
   }
@@ -394,17 +405,37 @@
     }
   }
   /* ---------- entities ---------- */
+  var PAL_GEM = { C: "#7ef3ff", W: "#ffffff", D: "#0d5f72" };
+  var GEM = [
+    "....CC....",
+    "...CWCD...",
+    "..CWCCCD..",
+    ".CWCCCCCD.",
+    "CWCCCCCCCD",
+    "DCCCCCCCCD",
+    ".DCCCCCCD.",
+    "..DCCCCD..",
+    "...DCCD...",
+    "....DD...."
+  ];
   function gemSprite(cx, cy) {
+    /* Rhombus squashed horizontally by a spin cycle so the facet reads as rotating. */
     var w = 3 + Math.abs(Math.sin(clock * 3.2)) * 7;
-    var h = 10;
-    var gx = Math.round(cx - w / 2);
+    var h = GEM.length;
     var gy = Math.round(cy - h / 2);
-    ctx.fillStyle = "#0d5f72";
-    ctx.fillRect(gx, gy, Math.max(2, Math.round(w)), h);
-    ctx.fillStyle = "#7ef3ff";
-    ctx.fillRect(gx + 1, gy + 1, Math.max(1, Math.round(w) - 2), h - 3);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(gx + 1, gy + 2, Math.max(1, Math.round(w / 3)), 2);
+    var left = cx - w / 2;
+    var cols = GEM[0].length;
+    for (var r = 0; r < h; r++) {
+      var row = GEM[r];
+      for (var c = 0; c < cols; c++) {
+        var fill = PAL_GEM[row.charAt(c)];
+        if (!fill) continue;
+        var x0 = Math.round(left + (c * w) / cols);
+        var x1 = Math.round(left + ((c + 1) * w) / cols);
+        ctx.fillStyle = fill;
+        ctx.fillRect(x0, gy + r, Math.max(1, x1 - x0), 1);
+      }
+    }
   }
   function onScreen(x, pad) {
     var cam = state.camera.x;
@@ -467,14 +498,15 @@
     var t = Math.max(0, Math.ceil(state.time));
     var mm = Math.floor(t / 60);
     var ss = ("0" + (t % 60)).slice(-2);
+    /* Two rows per side; at the 240 px portrait view width each side stays inside 116 game px. */
     text("SCORE " + state.score, 4, 4, 8, "#ffffff");
-    text("GEM " + state.gems, 4, 16, 8, "#7ef3ff");
-    var rx = view.width - 4;
-    text("TIME " + mm + ":" + ss, rx, 16, 8, t <= 30 ? "#ff8a7a" : "#ffffff", "right");
-    text(name.toUpperCase() + " " + (state.level + 1) + "/3", rx, 4, 8, "#ffe66a", "right");
+    text("GEMS " + state.gems, 4, 16, 8, "#7ef3ff");
     for (var i = 0; i < Math.min(state.lives, 6); i++) {
       blit(LIFE_ICON, 5 + i * 9, 27, { D: "#0f7f7a", W: "#2fd8c8" }, false);
     }
+    var rx = view.width - 4;
+    text("TIME " + mm + ":" + ss, rx, 16, 8, t <= 30 ? "#ff8a7a" : "#ffffff", "right");
+    text(name.toUpperCase() + " " + (state.level + 1) + "/3", rx, 4, 8, "#ffe66a", "right");
   }
   function overlayScreen(lines) {
     ctx.fillStyle = "rgba(6, 8, 20, 0.72)";
@@ -526,6 +558,15 @@
     ctx.fillRect(0, 0, view.pxW, view.pxH);
     ctx.setTransform(view.scale, 0, 0, view.scale, view.offX, view.offY);
     ctx.imageSmoothingEnabled = false;
+    /* Keep every layer (backdrop included) inside the game view rectangle. */
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, view.width, view.height);
+    ctx.clip();
+    drawScene();
+    ctx.restore();
+  }
+  function drawScene() {
     if (screen === "title" || !state) {
       drawBackdrop("meadow", 0);
       blit(pipRows(1, false, false), Math.round(view.width / 2) - 6, Math.round(view.height / 2) + 22, PAL_PIP, false);

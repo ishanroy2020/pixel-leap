@@ -132,7 +132,7 @@
     view.offY = sized.offY;
     view.bandPx = sized.bandPx;
     view.portrait = sized.portrait;
-    if (state) { state.viewWidth = view.width; PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width); }
+    if (state) { state.viewWidth = view.width; PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width * PixelLeap.TILE); }
     ctx.imageSmoothingEnabled = false;
   }
 
@@ -662,7 +662,7 @@
     state = PixelLeap.createGame({ level: debugLevel, lives: 3 });
     if (debugBig) state.player.big = true;
     state.viewWidth = view.width;
-    PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width);
+    PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width * PixelLeap.TILE);
     previous = PixelCamera.capture(state);
     hitStop = 0;
     acc = 0;
@@ -765,7 +765,7 @@
         else {
           PixelLeap.restart(state);
           previous = PixelCamera.capture(state);
-          PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width);
+          PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width * PixelLeap.TILE);
         }
         drainEvents();
         acc = 0;
@@ -774,7 +774,7 @@
         if (state) {
           PixelLeap.nextLevel(state);
           previous = PixelCamera.capture(state);
-          PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width);
+          PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width * PixelLeap.TILE);
           drainEvents();
           acc = 0;
           audio.setMusic((PixelLeap.LEVELS[state.level] || { theme: "meadow" }).theme);
@@ -799,11 +799,11 @@
           var beforePlayer = { x: state.player.x, y: state.player.y };
           var entityCount = state.enemies.length + state.items.length;
           PixelLeap.step(state, playerInput, Math.min(STEP, MAX_DT));
-          PixelCamera.update(renderCamera, state.player, { w: view.width }, state.width, STEP);
+          PixelCamera.update(renderCamera, state.player, { w: view.width }, state.width * PixelLeap.TILE, STEP);
           if (entityCount !== state.enemies.length + state.items.length) previous = PixelCamera.capture(state);
           if (state.events.indexOf("die") !== -1 || Math.abs(state.player.x - beforePlayer.x) > 32 || Math.abs(state.player.y - beforePlayer.y) > 32) {
             previous = PixelCamera.capture(state);
-            PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width);
+            PixelCamera.reset(renderCamera, state.player, { w: view.width }, state.width * PixelLeap.TILE);
           }
           drainEvents();
           acc -= STEP;

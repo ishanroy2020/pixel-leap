@@ -30,7 +30,7 @@
     // Eyes sit in the upper third of the head on every pose.
     var ey=top+3; if(name==='blink'){for(x=4;x<=6;x++)put(x,ey+1,'O');for(x=9;x<=11;x++)put(x,ey+1,'O');}
     else if(name==='hurt'){for(x=0;x<3;x++){put(4+x,ey+x,'P');put(6-x,ey+x,'P');put(9+x,ey+x,'P');put(11-x,ey+x,'P');}}
-    else {for(x=4;x<=6;x++)for(y=ey;y<ey+4;y++)put(x,y,'W');for(x=9;x<=11;x++)for(y=ey;y<ey+4;y++)put(x,y,'W'); put(5,ey+1,'P');put(5,ey+2,'P');put(10,ey+1,'P');put(10,ey+2,'P');put(4,ey,'H');put(9,ey,'H');}
+    else {for(x=4;x<=6;x++)for(y=ey;y<ey+4;y++)put(x,y,'W');for(x=9;x<=11;x++)for(y=ey;y<ey+4;y++)put(x,y,'W'); put(5,ey+1,'P');put(6,ey+1,'P');put(5,ey+2,'P');put(6,ey+2,'P');put(10,ey+1,'P');put(11,ey+1,'P');put(10,ey+2,'P');put(11,ey+2,'P');put(5,ey,'H');put(10,ey,'H');}
     put(3,ey+4,'C');put(12,ey+4,'C');
     if(name==='win'){put(1,top+8,'O');put(1,top+7,'T');put(14,top+8,'O');put(14,top+7,'T');}
     return rows.map(function(r){return r.join('');});

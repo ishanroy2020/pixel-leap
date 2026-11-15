@@ -753,11 +753,11 @@
   requestAnimationFrame(frame);
 
   /* Read-only handle for headless verification. */
-  window.__pixelLeap = {
-    get state() { return state; },
+  window.__pixelLeap = Object.freeze({
+    get state() { return state ? JSON.parse(JSON.stringify(state)) : null; },
     get screen() { return screen; },
     get paused() { return paused; }
-  };
+  });
 })();
 </script>
 </body>

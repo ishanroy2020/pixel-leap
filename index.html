@@ -173,16 +173,17 @@
   var PAL_FLY = { Y: "#f5d43c", D: "#3a2f10", W: "#e9f6ff", K: "#1b2130" };
   var PAL_LEAF = { G: "#5fd24a", D: "#21701f", L: "#a5ef7a", K: "#8a5a2b" };
 
+  var frameEvents=[], frameElapsed=0;
   function drawPipSprite(p,pp,cam){
-    var pose=pipAnimator.update(p,null,Math.min(.05,acc||0),events,p.mode||state.mode), big=!!p.big, h=big?28:18;
-    var px=PixelCamera.snap(pp.x-cam+((p.w||12)-16)/2,view.S), py=PixelCamera.snap(pp.y+(p.h||14)-h,view.S);
-    var ground=Math.max(0,Math.min(1,(p.y+p.h-(pp.y+pp.h||p.y+p.h))/18));
+    var big=!!p.big,h=big?28:18,px=PixelCamera.snap(pp.x-cam+((p.w||12)-16)/2,view.S),py=PixelCamera.snap(pp.y+(p.h||14)-h,view.S);
+    var pose=pipAnimator.update(p,ctl.input?ctl.input():null,frameElapsed,frameEvents,state.mode,{x:px/view.S+cam,y:py/view.S});
     if(!pipShadow){pipShadow=document.createElement('canvas');pipShadow.width=32;pipShadow.height=10;var sc=pipShadow.getContext('2d'),g=sc.createRadialGradient(16,5,1,16,5,15);g.addColorStop(0,'rgba(0,0,0,.25)');g.addColorStop(1,'rgba(0,0,0,0)');sc.fillStyle=g;sc.fillRect(0,0,32,10);}
-    ctx.globalAlpha=1;ctx.drawImage(pipShadow,PixelCamera.snap(pp.x-cam-4,view.S),PixelCamera.snap(p.y+p.h-2+ground*5,view.S),24,7);
+    var floorY=PixelAnim.findFloor(state,p.x+(p.w||12)/2,p.y+(p.h||14)),above=floorY===null?64:Math.max(0,floorY-(p.y+p.h)),shadowAlpha=.25*Math.max(0,1-above/64);
+    if(floorY!==null&&shadowAlpha>0){var shadowScale=Math.max(0,1-above/64);ctx.globalAlpha=shadowAlpha/.25;ctx.drawImage(pipShadow,PixelCamera.snap(pp.x-cam-4*shadowScale,view.S),PixelCamera.snap(floorY,view.S),24*shadowScale,7*shadowScale);ctx.globalAlpha=1;}
     ctx.save();ctx.translate(px+8,py+h);ctx.scale((p.facing<0?-1:1)*Math.round(pose.sx*16)/16,Math.round(pose.sy*16)/16);ctx.translate(-8,-h);
     var frameCanvas=pipBakeCache.get(pose.name,pose.frame,big);ctx.drawImage(frameCanvas,0,0);ctx.restore();
     ctx.fillStyle=PixelSprites.PAL.S;
-    for(var j=0;j<6;j++){var pt=pose.scarf[j],tx=PixelCamera.snap(pt.x-cam,1),ty=PixelCamera.snap(pt.y,1);ctx.fillStyle=j<4?PixelSprites.PAL.S:PixelSprites.PAL.Q;ctx.fillRect(tx,ty,Math.max(1,2-Math.floor(j/3)),2);}
+    for(var j=0;j<6;j++){var pt=pose.scarf[j],tx=PixelCamera.snap(pt.x-cam,1),ty=PixelCamera.snap(pt.y,1);ctx.fillStyle=j<4?PixelSprites.PAL.S:PixelSprites.PAL.Q;ctx.fillRect(tx,ty,Math.max(1,2-Math.floor(j/3)),1);}
   }
   var LIFE_ICON = ["DDD.DDD", "DWWDWWD", "DWWWWWD", "DWWWWWD", ".DDDDD.", "..DDD..", "...D..."];
 
@@ -615,6 +616,7 @@
     audio.playEvents(q);
     for (var i = 0; i < q.length; i++) {
       events.push(q[i]);
+      frameEvents.push(q[i]);
       if (q[i] === "stomp") hitStop = Math.max(hitStop, 0.06);
       else if (q[i] === "hurt") hitStop = Math.max(hitStop, 0.08);
       else if (q[i] === "die") hitStop = Math.max(hitStop, 0.12);
@@ -715,6 +717,7 @@
     var elapsed = now - last;
     last = now;
     if (elapsed > 0.25) elapsed = 0.25;
+    frameElapsed=Math.min(.05,elapsed);frameEvents.length=0;
     if (document.hidden) {
       flow.pause();
       ctl.reset();

@@ -348,28 +348,40 @@
       let guard = 0;
       while (guard++ < 64) {
         const base = track.origin + track.cycle * track.melody.len;
-        if (base >= horizon) break;
-        let advanced = false;
-        for (let l = 0; l < lanes.length; l++) {
-          const notes = lanes[l].notes;
-          let i = track.next[l];
-          while (i < notes.length) {
-            const n = notes[i];
-            const start = base + n.start;
-            if (start >= horizon) break;
-            const v = spawn(n.wave, n.hz, 0, start, n.dur, n.vol, true);
-            if (!v) {
-              track.next[l] = i;
-              return;
+        let scheduled = false;
+        if (base < horizon) {
+          for (let l = 0; l < lanes.length; l++) {
+            const notes = lanes[l].notes;
+            let i = track.next[l];
+            while (i < notes.length) {
+              const n = notes[i];
+              const start = base + n.start;
+              if (start >= horizon) break;
+              const v = spawn(n.wave, n.hz, 0, start, n.dur, n.vol, true);
+              if (!v) {
+                track.next[l] = i;
+                return;
+              }
+              i += 1;
+              scheduled = true;
             }
-            i += 1;
-            advanced = true;
+            track.next[l] = i;
           }
-          track.next[l] = i;
         }
-        if (!advanced) break;
+        // Wrap only once every lane has been drained inside this cycle. The check
+        // below lets a fully-queued cycle advance even when its base has slid past
+        // the horizon; without the wrap the loop stalls after its first bar.
+        let drained = true;
+        for (let l = 0; l < lanes.length; l++) {
+          if (track.next[l] < lanes[l].notes.length) {
+            drained = false;
+            break;
+          }
+        }
+        if (!drained) break;
         track.cycle += 1;
         track.next = [0, 0];
+        if (!scheduled) break;
       }
     }
 
@@ -446,6 +458,10 @@
             music = newTrack(melody);
           }
           const time = now();
+          // Music voices are never released by a callback, so retire them here
+          // once their envelope has finished; otherwise the voice budget fills and
+          // the loop goes silent for good.
+          pruneVoices();
           scheduleTrack(music, time, time + LOOKAHEAD);
         } catch (e) {
           /* ignore */

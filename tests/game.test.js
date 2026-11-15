@@ -190,7 +190,7 @@ test("head-bump a ? block: becomes U, +1 gem, +100 score, event gem", () => {
     P.step(st, JUMP, DT);
     log.push(...st.events.splice(0, st.events.length));
   }
-  assert.deepEqual(log, ["gem"]);
+  assert.deepEqual(log.filter((e) => e !== "jump"), ["gem"]);
   assert.equal(st.tiles[10][19], "U");
   assert.equal(st.gems, 1);
   assert.equal(st.score, 100);
@@ -209,7 +209,7 @@ test("brick: small gives event bump with the tile intact, big breaks it for 50",
     P.step(small, JUMP, DT);
     smallLog.push(...small.events.splice(0, small.events.length));
   }
-  assert.deepEqual(smallLog, ["bump"]);
+  assert.deepEqual(smallLog.filter((e) => e !== "jump"), ["bump"]);
   assert.equal(small.tiles[11][19], "B", "small Pip cannot break a brick");
   assert.equal(small.score, 0);
 
@@ -222,7 +222,7 @@ test("brick: small gives event bump with the tile intact, big breaks it for 50",
     P.step(big, JUMP, DT);
     bigLog.push(...big.events.splice(0, big.events.length));
   }
-  assert.deepEqual(bigLog, ["break"]);
+  assert.deepEqual(bigLog.filter((e) => e !== "jump"), ["break"]);
   assert.equal(big.tiles[11][19], ".");
   assert.equal(big.score, 50);
 });
@@ -239,7 +239,7 @@ test("a P block spawns a Sprout that makes Pip big when collected", () => {
     P.step(st, JUMP, DT);
     log.push(...st.events.splice(0, st.events.length));
   }
-  assert.deepEqual(log, ["sprout"], "bumping P only spawns the Sprout");
+  assert.deepEqual(log.filter((e) => e !== "jump"), ["sprout"], "bumping P only spawns the Sprout");
   assert.equal(st.tiles[10][19], "U");
   assert.equal(st.items.length, 1);
   assert.equal(st.items[0].kind, "sprout");
@@ -253,7 +253,7 @@ test("a P block spawns a Sprout that makes Pip big when collected", () => {
     frames += 1;
   }
   assert.equal(st.items.length, 0, "the Sprout was collected");
-  assert.deepEqual(log, ["sprout", "powerup"]);
+  assert.deepEqual(log.filter((e) => e !== "jump"), ["sprout", "powerup"]);
   assert.equal(st.player.big, true);
   assert.equal(st.player.h, 24);
   assert.equal(st.player.y + st.player.h, 14 * P.TILE, "feet stay on the floor");

@@ -42,12 +42,29 @@
     background: #000;
     image-rendering: pixelated;
     touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  /* Zero-size probe: env() resolves to the device insets on any element, so this
+     one exists only to hand the CSS-px safe areas to PixelControls.layout(). */
+  #safe-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    visibility: hidden;
+    pointer-events: none;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
+<div id="safe-area" aria-hidden="true"></div>
 <script src="game.js"></script>
+<script src="controls.js"></script>
 <script>
 "use strict";
 (function () {
@@ -57,12 +74,32 @@
   var canvas = document.getElementById("game");
   var ctx = canvas.getContext("2d", { alpha: false });
 
-  var view = { width: 320, height: VIEW_H, scale: 1, offX: 0, offY: 0, pxW: 320, pxH: 240, portrait: false };
+  var view = { width: 320, height: VIEW_H, scale: 1, offX: 0, offY: 0, pxW: 320, pxH: 240, portrait: false, dpr: 1 };
+
+  var safeProbe = document.getElementById("safe-area");
+  var layout = null;
+
+  /* env() insets as CSS px, read once per resize from a hidden probe element. */
+  function safeInsets() {
+    var cs = window.getComputedStyle(safeProbe);
+    return {
+      top: parseFloat(cs.paddingTop) || 0,
+      right: parseFloat(cs.paddingRight) || 0,
+      bottom: parseFloat(cs.paddingBottom) || 0,
+      left: parseFloat(cs.paddingLeft) || 0
+    };
+  }
+
+  var ctl = PixelControls.createControls(PixelControls.layout(320, 240, safeInsets()));
 
   function resize() {
     var dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
     var cssW = Math.max(1, canvas.clientWidth || window.innerWidth || 320);
     var cssH = Math.max(1, canvas.clientHeight || window.innerHeight || 240);
+    view.dpr = dpr;
+    var safe = safeInsets();
+    layout = PixelControls.layout(cssW, cssH, safe);
+    ctl.setLayout(layout);
     view.pxW = Math.max(1, Math.round(cssW * dpr));
     view.pxH = Math.max(1, Math.round(cssH * dpr));
     canvas.width = view.pxW;
@@ -388,8 +425,10 @@
       });
     } else {
       ctx.fillStyle = "rgba(255,252,225,0.9)";
-      var mx = Math.round(view.width * 0.2 - cam * 0.04);
-      ctx.fillRect(mx, 18, 18, 18);
+      /* Right third of the sky, clamped so the parallax scroll never carries it
+         behind the left-hand score/gem/lives HUD. */
+      var mx = Math.max(Math.round(view.width * 0.55), Math.round(view.width * 0.66 - cam * 0.04));
+      ctx.fillRect(mx, 44, 18, 18);
       spans(160, cam, 0.2, function (x, i) {
         ctx.fillStyle = th.hillFar;
         hill(x - 20, base + 6 + (i % 2) * 8, 96, 38);
@@ -528,7 +567,6 @@
   var acc = 0;
   var STEP = 1 / 60;
   var MAX_DT = 1 / 30;
-  var input = { left: false, right: false, jump: false };
   var events = [];
 
   function drainEvents() {
@@ -565,6 +603,13 @@
     ctx.clip();
     drawScene();
     ctx.restore();
+    /* Thumb buttons live in CSS-px space, above the letterboxed game view. */
+    if (ctl.touchActive() && layout) {
+      ctx.save();
+      ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+      PixelControls.drawButtons(ctx, layout, ctl.pressed());
+      ctx.restore();
+    }
   }
   function drawScene() {
     if (screen === "title" || !state) {
@@ -617,13 +662,19 @@
     if (elapsed > 0.25) elapsed = 0.25;
     if (document.hidden) {
       if (screen === "playing") paused = true;
+      ctl.reset();
     } else {
+      if (ctl.consumePause()) {
+        if (screen === "playing") paused = !paused;
+      }
+      if (ctl.consumeAction()) pressEnter();
+      var playerInput = ctl.input();
       clock += elapsed;
       acc += elapsed;
       var guard = 0;
       while (acc >= STEP && guard < 10) {
         if (screen === "playing" && !paused && state) {
-          PixelLeap.step(state, input, Math.min(STEP, MAX_DT));
+          PixelLeap.step(state, playerInput, Math.min(STEP, MAX_DT));
           drainEvents();
         }
         acc -= STEP;
@@ -637,33 +688,45 @@
 
   window.addEventListener("resize", resize);
   window.addEventListener("orientationchange", function () { setTimeout(resize, 150); });
-  document.addEventListener("visibilitychange", function () { last = 0; acc = 0; });
+  document.addEventListener("visibilitychange", function () {
+    last = 0;
+    acc = 0;
+    if (document.hidden) ctl.reset();
+  });
 
-  function setKey(k, down, ev) {
-    if (k === "ArrowLeft" || k === "a" || k === "A") { input.left = down; return true; }
-    if (k === "ArrowRight" || k === "d" || k === "D") { input.right = down; return true; }
-    if (k === " " || k === "Spacebar" || k === "w" || k === "W" || k === "ArrowUp") { input.jump = down; return true; }
-    return false;
-  }
+  /* Single input path: every key and pointer goes through PixelControls. */
   window.addEventListener("keydown", function (ev) {
-    if (setKey(ev.key, true, ev)) { ev.preventDefault(); return; }
-    var k = ev.key;
-    if (k === "p" || k === "P" || k === "Escape") {
-      if (screen === "playing") paused = !paused;
-      ev.preventDefault();
-    } else if (k === "Enter") {
-      pressEnter();
-      ev.preventDefault();
-    }
+    if (ctl.keyDown(ev.code)) ev.preventDefault();
   });
   window.addEventListener("keyup", function (ev) {
-    if (setKey(ev.key, false, ev)) ev.preventDefault();
+    if (ctl.keyUp(ev.code)) ev.preventDefault();
   });
   window.addEventListener("blur", function () {
-    input.left = false;
-    input.right = false;
-    input.jump = false;
+    ctl.reset();
   });
+
+  function canvasPoint(ev) {
+    var r = canvas.getBoundingClientRect();
+    return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+  }
+  canvas.addEventListener("pointerdown", function (ev) {
+    ev.preventDefault();
+    var p = canvasPoint(ev);
+    ctl.pointerDown(ev.pointerId, p.x, p.y, ev.pointerType);
+  }, { passive: false });
+  canvas.addEventListener("pointermove", function (ev) {
+    ev.preventDefault();
+    var p = canvasPoint(ev);
+    ctl.pointerMove(ev.pointerId, p.x, p.y);
+  }, { passive: false });
+  canvas.addEventListener("pointerup", function (ev) {
+    ev.preventDefault();
+    ctl.pointerUp(ev.pointerId);
+  }, { passive: false });
+  canvas.addEventListener("pointercancel", function (ev) {
+    ev.preventDefault();
+    ctl.pointerUp(ev.pointerId);
+  }, { passive: false });
 
   resize();
   requestAnimationFrame(frame);

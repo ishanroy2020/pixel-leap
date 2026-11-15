@@ -481,7 +481,7 @@
     var cam = state.camera.x;
     return x - cam > -pad && x - cam < view.width + pad;
   }
-  function drawEntities() {
+  function drawEntities(skipPlayer) {
     var cam = state.camera.x;
     var i;
     for (i = 0; i < state.gemList.length; i++) {
@@ -500,6 +500,7 @@
       if (e.kind === "buzzer") buzzerSprite(e.x - cam, e.y, e);
       else grumbleSprite(e.x - cam, e.y, e);
     }
+    if (skipPlayer) return;
     var p = state.player;
     var frameIdx = 1;
     if (p.onGround && Math.abs(p.vx) > 8) frameIdx = Math.floor(clock * 9) % 2 === 0 ? 0 : 2;
@@ -614,16 +615,20 @@
   function levelName() {
     return (PixelLeap.LEVELS[state.level] || { name: "?" }).name;
   }
+  /* ctl.touchActive() only turns on after the first touch, so the very first
+     prompt would say SPACE on a phone; classify the device instead. */
+  function touchMode() {
+    return (
+      ctl.touchActive() ||
+      (window.matchMedia && matchMedia("(pointer: coarse)").matches) ||
+      navigator.maxTouchPoints > 0
+    );
+  }
   function drawScene() {
-    if (!state || flow.screen === "title") {
-      drawBackdrop("meadow", 0);
-      blit(pipRows(1, false, false), Math.round(view.width / 2) - 6, Math.round(view.height / 2) + 22, PAL_PIP, false);
-    } else {
-      drawBackdrop(theme(), state.camera.x);
-      drawTiles();
-      drawEntities();
-      hud();
-    }
+    drawBackdrop(theme(), state.camera.x);
+    drawTiles();
+    drawEntities(flow.screen === "title");
+    if (flow.screen !== "title") hud();
     /* Screen flow overlays (title / paused / clear / game over / won) in game px. */
     PixelScreens.drawScreen(
       ctx,
@@ -635,7 +640,7 @@
         lives: state ? state.lives : 0,
         levelName: state ? levelName() : "LEVEL",
         muted: false,
-        touch: ctl.touchActive()
+        touch: touchMode()
       },
       view.width,
       view.height,
@@ -734,6 +739,7 @@
     ctl.pointerUp(ev.pointerId);
   }, { passive: false });
 
+  newGame();
   resize();
   requestAnimationFrame(frame);
 

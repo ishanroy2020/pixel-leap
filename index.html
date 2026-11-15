@@ -82,6 +82,9 @@
 <script src="view.js"></script>
 <script src="sprites.js"></script>
 <script src="anim.js"></script>
+<script src="tiles.js"></script>
+<script src="backdrop.js"></script>
+<script src="props.js"></script>
 <script>
 "use strict";
 (function () {
@@ -125,7 +128,9 @@
     view.pxH = Math.max(1, Math.round(cssH * dpr));
     canvas.width = view.pxW;
     canvas.height = view.pxH;
-    backdropCache=Object.create(null); gradientCache=Object.create(null); panelCache=Object.create(null); tileCache=Object.create(null);
+    PixelBackdrop.clearCache();
+    PixelTiles.clearCache();
+    panelCache = Object.create(null);
     var sized = PixelView.compute(view.pxW, view.pxH, dpr, safe);
     view.S = sized.S;
     view.width = sized.w;
@@ -145,9 +150,15 @@
   var hitStop = 0;
   var renderCamX = 0;
   var spriteIds = new WeakMap(), nextSpriteId = 1;
+  var propArt=Object.create(null), pitArt=Object.create(null), plannedProps=null, plannedFor=null;
+  var panelCache = Object.create(null);
 
   function theme() {
     return (PixelLeap.LEVELS[state.level] || { theme: "meadow" }).theme;
+  }
+  function themeColors() {
+    var palette = PixelTiles.palettes[theme()] || PixelTiles.palettes.meadow;
+    return { dirt: palette.dirt[0], dark: palette.dark, topHi: palette.hi };
   }
   /* ---------- sprite blitting from character maps ---------- */
   var spriteCache = Object.create(null);
@@ -183,7 +194,7 @@
     ctx.save();ctx.translate(px+8,py+h);ctx.scale((p.facing<0?-1:1)*Math.round(pose.sx*16)/16,Math.round(pose.sy*16)/16);ctx.translate(-8,-h);
     var frameCanvas=pipBakeCache.get(pose.name,pose.frame,big);ctx.drawImage(frameCanvas,0,0);ctx.restore();
     ctx.fillStyle=PixelSprites.PAL.S;
-    for(var j=0;j<6;j++){var pt=pose.scarf[j],tx=PixelCamera.snap(pt.x-cam,view.S),ty=PixelCamera.snap(pt.y,view.S);ctx.fillStyle=j<4?PixelSprites.PAL.S:PixelSprites.PAL.Q;ctx.fillRect(tx,ty,Math.max(1,2-Math.floor(j/3)),1);}
+    for(var j=1;j<6;j++){var a=pose.scarf[j-1],b=pose.scarf[j],dx=b.x-a.x,dy=b.y-a.y,n=Math.max(1,Math.ceil(Math.hypot(dx,dy))),thick=j<4?2:1;ctx.fillStyle=j<4?PixelSprites.PAL.S:PixelSprites.PAL.Q;for(var k=0;k<=n;k++){var tx=PixelCamera.snap(a.x+dx*k/n-cam,view.S),ty=PixelCamera.snap(a.y+dy*k/n,view.S);ctx.fillRect(tx,ty,thick,thick);}}
   }
   var LIFE_ICON = ["DDD.DDD", "DWWDWWD", "DWWWWWD", "DWWWWWD", ".DDDDD.", "..DDD..", "...D..."];
 
@@ -240,248 +251,43 @@
     "...KKK......",
     "............"
   ];
-  /* ---------- tiles ---------- */
-  var THEME = {
-    meadow: { sky: ["#3fa9f5", "#a8e0ff"], dirt: "#6b4a2f", dark: "#3f2a18", top: "#4fc240", topHi: "#8ee06a", hill: "#2f8f3a", hillFar: "#69c05a" },
-    caverns: { sky: ["#0a1030", "#161e42"], dirt: "#2c3358", dark: "#171c36", top: "#4a5aa0", topHi: "#7d8fd8", hill: "#1d2450", hillFar: "#2a3468" },
-    sky: { sky: ["#ff9a4a", "#ffd9a0"], dirt: "#6a5a86", dark: "#3b3157", top: "#c9a0ff", topHi: "#f0d8ff", hill: "#8a6ab0", hillFar: "#b98fd6" }
-  };
-  function drawTileArt(ch, dx, dy, tx, ty) {
-    var th = THEME[theme()] || THEME.meadow;
-    if (ch === "#") {
-      ctx.fillStyle = th.dirt;
-      ctx.fillRect(dx, dy, TILE, TILE);
-      ctx.fillStyle = th.dark;
-      if ((tx * 7 + ty * 13) % 5 === 0) ctx.fillRect(dx + 3, dy + 8, 3, 2);
-      if ((tx * 11 + ty * 5) % 4 === 0) ctx.fillRect(dx + 10, dy + 11, 3, 2);
-      ctx.fillStyle = th.top;
-      ctx.fillRect(dx, dy, TILE, 4);
-      ctx.fillStyle = th.topHi;
-      ctx.fillRect(dx, dy, TILE, 2);
-      if ((tx * 3) % 2 === 0) ctx.fillRect(dx + 2, dy + 4, 2, 2);
-      if ((tx * 5) % 3 === 0) ctx.fillRect(dx + 11, dy + 4, 2, 2);
-    } else if (ch === "B") {
-      ctx.fillStyle = "#a85a34";
-      ctx.fillRect(dx, dy, TILE, TILE);
-      ctx.fillStyle = "#d1794a";
-      ctx.fillRect(dx, dy, TILE, 2);
-      ctx.fillStyle = "#5e2f1a";
-      ctx.fillRect(dx, dy + 7, TILE, 1);
-      ctx.fillRect(dx, dy + 15, TILE, 1);
-      ctx.fillRect(dx + 7, dy + 1, 1, 6);
-      ctx.fillRect(dx + 3, dy + 8, 1, 7);
-      ctx.fillRect(dx + 11, dy + 8, 1, 7);
-    } else if (ch === "?" || ch === "P") {
-      ctx.fillStyle = "#c9971a";
-      ctx.fillRect(dx, dy, TILE, TILE);
-      ctx.fillStyle = "#f5d033";
-      ctx.fillRect(dx + 1, dy + 1, 14, 14);
-      ctx.fillStyle = "#ffe98a";
-      ctx.fillRect(dx + 1, dy + 1, 14, 2);
-      ctx.fillStyle = "#8a6300";
-      ctx.fillRect(dx + 2, dy + 12, 12, 2);
-      ctx.fillStyle = "#7a5200";
-      ctx.fillRect(dx + 2, dy + 2, 2, 2);
-      ctx.fillRect(dx + 12, dy + 2, 2, 2);
-      ctx.fillRect(dx + 2, dy + 10, 2, 2);
-      ctx.fillRect(dx + 12, dy + 10, 2, 2);
-      if (Math.floor(clock * 6 + tx + ty) % 4 === 0) {
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(dx + 5, dy + 4, 2, 2);
-        ctx.fillRect(dx + 8, dy + 8, 2, 2);
-      }
-    } else if (ch === "U") {
-      ctx.fillStyle = "#7a6534";
-      ctx.fillRect(dx, dy, TILE, TILE);
-      ctx.fillStyle = "#9c8347";
-      ctx.fillRect(dx + 1, dy + 1, 14, 13);
-      ctx.fillStyle = "#5b4a24";
-      ctx.fillRect(dx + 3, dy + 3, 3, 3);
-      ctx.fillRect(dx + 10, dy + 8, 3, 3);
-    } else if (ch === "^") {
-      for (var s = 0; s < 4; s++) {
-        var bx = dx + s * 4;
-        ctx.fillStyle = "#9aa6b8";
-        ctx.fillRect(bx + 1, dy + 4, 2, 12);
-        ctx.fillRect(bx, dy + 9, 4, 7);
-        ctx.fillStyle = "#d6deea";
-        ctx.fillRect(bx + 1, dy + 4, 1, 6);
-      }
-      ctx.fillStyle = "#5c6675";
-      ctx.fillRect(dx, dy + 14, TILE, 2);
-    } else if (ch === "F") {
-      var pulse = 0.5 + 0.5 * Math.sin(clock * 4);
-      ctx.fillStyle = "rgba(255,230,106," + (0.18 + 0.3 * pulse).toFixed(2) + ")";
-      ctx.fillRect(dx - 4, dy - 6, 24, 26);
-      ctx.fillStyle = "#4a5568";
-      ctx.fillRect(dx + 6, dy, 4, TILE);
-      ctx.fillStyle = "#8fa3c0";
-      ctx.fillRect(dx + 6, dy, 2, TILE);
-      ctx.fillStyle = "#ffe66a";
-      ctx.fillRect(dx + 4, dy - 11, 8, 8);
-      ctx.fillRect(dx + 1, dy - 8, 14, 2);
-      ctx.fillStyle = "#fff8d0";
-      ctx.fillRect(dx + 6, dy - 9, 4, 4);
-    }
+  /* ---------- cached world tiles and parallax backdrop ---------- */
+  function solidAt(tx,ty) {
+    if (!state || ty < 0 || ty >= state.height || tx < 0 || tx >= state.width) return false;
+    return "#B?PU".indexOf(state.tiles[ty][tx]) >= 0;
   }
-  var tileCache = Object.create(null);
-  function drawTile(ch, dx, dy, tx, ty) {
-    var v1=tx%60, v2=ty%20;
-    var anim=ch==="?"||ch==="P" ? Math.floor(clock*6+tx+ty)%4 : ch==="F" ? Math.round((Math.sin(clock*4)+1)*4) : 0;
-    var key=theme()+":"+ch+":"+v1+":"+v2+":"+anim;
-    var c=tileCache[key];
-    if(!c){
-      c=document.createElement("canvas"); c.width=TILE+16; c.height=TILE+22;
-      var old=ctx; ctx=c.getContext("2d"); drawTileArt(ch,8,11,tx,ty); ctx=old;
-      tileCache[key]=c;
+  function pitColumns() {
+    var out=[];
+    for(var x=0;x<state.width;x++) {
+      var gap=true;
+      for(var y=Math.max(0,state.height-2);y<state.height;y++) if(solidAt(x,y)){gap=false;break;}
+      if(gap) out.push(x);
     }
-    ctx.drawImage(c,dx-8,dy-11);
+    return out;
   }
+  var cachedPitId="", cachedPits=[];
+  function getPitColumns(){var id=state.level+":"+state.width+":"+state.height;if(id!==cachedPitId){cachedPitId=id;cachedPits=pitColumns();}return cachedPits;}
+  function floorSurface(col){for(var y=0;y<state.height;y++)if(state.tiles[y][col]==="#")return y*TILE;return null;}
+  function floorChar(col){for(var y=0;y<state.height;y++)if(solidAt(col,y))return state.tiles[y][col];return null;}
+  function frontOccupied(col){var x0=col*TILE,x1=x0+TILE,all=[state.player].concat(state.enemies||[],state.items||[]);for(var i=0;i<all.length;i++){var e=all[i];if(e&&x0<e.x+(e.w||16)&&x1>e.x)return true;}for(var j=0;j<(state.gemList||[]).length;j++){var g=state.gemList[j];if(!g.taken&&x0<g.x+8&&x1>g.x-8)return true;}return false;}
   function drawTiles() {
-    var cam = renderCamX;
-    var t0 = Math.max(0, Math.floor(cam / TILE) - 1);
-    var t1 = Math.min(state.width - 1, Math.ceil((cam + view.width) / TILE));
-    for (var ty = 0; ty < state.height; ty++) {
-      var row = state.tiles[ty];
-      for (var tx = t0; tx <= t1; tx++) {
-        var ch = row[tx];
-        if (ch === ".") continue;
-        drawTile(ch, PixelCamera.snap(tx * TILE - cam, view.S), ty * TILE, tx, ty);
-      }
+    var cam=renderCamX, t0=Math.max(0,Math.floor(cam/TILE)-1), t1=Math.min(state.width-1,Math.ceil((cam+view.width)/TILE));
+    var pits=getPitColumns(), pitMap=Object.create(null); pits.forEach(function(x){pitMap[x]=1;});
+    for(var ty=0;ty<state.height;ty++) for(var tx=t0;tx<=t1;tx++) {
+      var ch=state.tiles[ty][tx]; if(ch==="."&&!pitMap[tx]) continue;
+      var dx=PixelCamera.snap(tx*TILE-cam,view.S),dy=ty*TILE;
+      if(pitMap[tx] && ty>=state.height-2) continue;
+      else PixelTiles.draw(ctx,ch,dx,dy,tx,ty,theme(),clock,solidAt);
     }
+    // The empty columns are the pits. Paint the void from the floor line down.
+    var pitTop=(state.height-2)*TILE;
+    pits.forEach(function(tx){var key="pit:"+theme()+":"+Math.max(0,view.height-pitTop),art=pitArt[key];if(!art){art=document.createElement("canvas");art.width=TILE;art.height=Math.max(1,view.height-pitTop);var ac=art.getContext("2d"),grad=ac.createLinearGradient(0,0,0,art.height),pal=PixelTiles.palettes[theme()]||PixelTiles.palettes.meadow;grad.addColorStop(0,pal.dark);grad.addColorStop(1,theme()==="meadow"?"#1a0f0a":theme()==="caverns"?"#05061a":"rgba(58,36,80,.85)");ac.fillStyle=grad;ac.fillRect(0,0,TILE,art.height);ac.fillStyle=pal.hi;ac.fillRect(0,0,TILE,1);pitArt[key]=art;}ctx.drawImage(art,PixelCamera.snap(tx*TILE-cam,view.S),pitTop);});
+    var id=state.level+":"+state.width+":"+state.height;
+    if(plannedFor!==id){plannedProps=PixelProps.plan(state.tiles,theme(),[state.player].concat(state.enemies||[],state.items||[]),state.gemList);plannedFor=id;}
+    (plannedProps||[]).forEach(function(prop){var sx=prop.x-cam;if(sx < -32 || sx > view.width+32)return;var key=theme()+":"+prop.kind;if(!propArt[key])propArt[key]=PixelProps.bake(prop.kind,theme());ctx.drawImage(propArt[key],PixelCamera.snap(sx,view.S),prop.floor-24);});
   }
-  /* ---------- parallax backdrop ---------- */
-  function hill(x, y, w, h) {
-    for (var r = 0; r < h; r++) {
-      var t = r / h;
-      var half = Math.round((w / 2) * (1 - t * t));
-      ctx.fillRect(x + w / 2 - half, y + r, half * 2, 1);
-    }
-  }
-  function cloud(x, y) {
-    ctx.fillRect(x, y + 4, 34, 7);
-    ctx.fillRect(x + 6, y, 16, 6);
-    ctx.fillRect(x + 22, y + 2, 10, 6);
-  }
-  function crystal(x, y, w, h) {
-    for (var r = 0; r < h; r++) {
-      var t = r / h;
-      var half = Math.max(1, Math.round((w / 2) * (1 - t)));
-      ctx.fillRect(x - half, y + r, half * 2, 1);
-    }
-  }
-  function spans(step, cam, rate, fn) {
-    var off = -((cam * rate + clock * 6) % step);
-    var n = Math.ceil(view.width / step) + 1;
-    for (var i = -1; i < n; i++) fn(PixelCamera.snap(off + i * step, view.S), i);
-  }
-  var gradientCache = Object.create(null);
-  var panelCache = Object.create(null);
-  function gradientCanvas(key, w, h, top, bottom) {
-    var cacheKey=key+":"+w+":"+h, c=gradientCache[cacheKey];
-    if (!c) {
-      c=document.createElement("canvas"); c.width=Math.max(1,Math.ceil(w)); c.height=Math.max(1,Math.ceil(h));
-      var cctx=c.getContext("2d"), g=cctx.createLinearGradient(0,0,0,c.height);
-      g.addColorStop(0,top); g.addColorStop(1,bottom); cctx.fillStyle=g; cctx.fillRect(0,0,c.width,c.height);
-      gradientCache[cacheKey]=c;
-    }
-    return c;
-  }
-  function drawBackdropArt(name, cam) {
-    var th = THEME[name] || THEME.meadow;
-    ctx.drawImage(gradientCanvas(name,view.width,view.height,th.sky[0],th.sky[1]),0,0);
-    var base = view.height - 3 * TILE;
-    if (name === "caverns") {
-      spans(90, cam, 0.15, function (x, i) {
-        var glow = (0.3 + 0.22 * Math.sin(clock * 2 + i)).toFixed(2);
-        ctx.fillStyle = "rgba(126,243,255," + glow + ")";
-        crystal(x, 26 + (i % 3) * 24, 12, 32);
-        ctx.fillStyle = "rgba(180,140,255," + glow + ")";
-        crystal(x + 40, 54 + (i % 2) * 28, 8, 24);
-      });
-      ctx.fillStyle = "rgba(120,140,220,0.22)";
-      spans(70, cam, 0.3, function (x) {
-        ctx.fillRect(x, base + 18, 26, 6);
-      });
-      ctx.fillStyle = "rgba(60,70,130,0.5)";
-      spans(64, cam, 0.45, function (x) {
-        ctx.fillRect(x, view.height - 2 * TILE, 30, 2 * TILE);
-      });
-    } else if (name === "sky") {
-      var sx = Math.round(view.width * 0.66 - cam * 0.05);
-      var sy = Math.round(view.height * 0.34);
-      ctx.fillStyle = "rgba(255,247,214,0.95)";
-      ctx.fillRect(sx - 14, sy - 14, 28, 28);
-      ctx.fillStyle = "rgba(255,120,60,0.30)";
-      ctx.fillRect(sx - 24, sy - 4, 48, 10);
-      ctx.fillStyle = "rgba(255,170,90,0.35)";
-      for (var b = 0; b < 4; b++) ctx.fillRect(0, sy + 16 + b * 14, view.width, 4);
-      spans(150, cam, 0.18, function (x, i) {
-        var lift = (i % 2) * 20;
-        ctx.fillStyle = th.hillFar;
-        ctx.fillRect(x, base - 8 + lift, 58, 10);
-        ctx.fillStyle = th.hill;
-        ctx.fillRect(x + 6, base + lift, 46, 8);
-        ctx.fillStyle = "rgba(255,255,255,0.35)";
-        ctx.fillRect(x + 6, base + lift, 46, 2);
-      });
-      ctx.fillStyle = "rgba(255,225,190,0.45)";
-      spans(170, cam, 0.1, function (x, i) {
-        cloud(x, 20 + (i % 2) * 18);
-      });
-    } else {
-      ctx.fillStyle = "rgba(255,252,225,0.9)";
-      /* Right third of the sky, clamped so the parallax scroll never carries it
-         behind the left-hand score/gem/lives HUD. */
-      var mx = Math.max(Math.round(view.width * 0.55), Math.round(view.width * 0.66 - cam * 0.04));
-      ctx.fillRect(mx, 44, 18, 18);
-      spans(160, cam, 0.2, function (x, i) {
-        ctx.fillStyle = th.hillFar;
-        hill(x - 20, base + 6 + (i % 2) * 8, 96, 38);
-      });
-      spans(120, cam, 0.4, function (x, i) {
-        ctx.fillStyle = th.hill;
-        hill(x, base + 22 + (i % 3) * 6, 68, 28);
-      });
-      ctx.fillStyle = "rgba(255,255,255,0.85)";
-      spans(140, cam, 0.12, function (x, i) {
-        cloud(x, 24 + (i % 3) * 16);
-      });
-    }
-  }
-  var backdropCache=Object.create(null);
-  function drawBackdrop(name, cam) {
-    var th=THEME[name]||THEME.meadow, repeat=Math.max(1,Math.ceil(view.width)), stripWidth=repeat*2;
-    ctx.drawImage(gradientCanvas(name,view.width,view.height,th.sky[0],th.sky[1]),0,0);
-    var base=view.height-3*TILE;
-    function getLayer(index, rate) {
-      var key=name+":"+view.width+":"+view.height+":"+index, c=backdropCache[key];
-      if(!c){
-        c=document.createElement("canvas"); c.width=stripWidth; c.height=view.height;
-        var old=ctx; ctx=c.getContext("2d");
-        for(var copy=0;copy<2;copy++){
-          var ox=copy*repeat;
-          if(name==="sky"){
-            if(index===0){ctx.fillStyle="rgba(255,225,190,0.45)"; for(var x=ox;x<ox+repeat;x+=170) cloud(x,20+((Math.floor(x/170)%2)*18));}
-            else if(index===1){for(var x=ox-150;x<ox+repeat;x+=150){ctx.fillStyle=th.hillFar;ctx.fillRect(x,base-8,58,10);ctx.fillStyle=th.hill;ctx.fillRect(x+6,base,46,8);}}
-            else {ctx.fillStyle="rgba(255,170,90,0.35)";for(var y=0;y<4;y++)ctx.fillRect(ox,view.height*.34+16+y*14,repeat,4);}
-          } else if(name==="caverns"){
-            if(index===0){ctx.fillStyle="rgba(126,243,255,0.48)";for(var x=ox;x<ox+repeat;x+=90)crystal(x,26+(Math.floor(x/90)%3)*24,12,32);}
-            else if(index===1){ctx.fillStyle="rgba(120,140,220,0.22)";for(var x=ox;x<ox+repeat;x+=70)ctx.fillRect(x,base+18,26,6);}
-            else {ctx.fillStyle="rgba(60,70,130,0.5)";for(var x=ox;x<ox+repeat;x+=64)ctx.fillRect(x,view.height-2*TILE,30,2*TILE);}
-          } else {
-            if(index===0){ctx.fillStyle="rgba(255,255,255,0.85)";for(var x=ox;x<ox+repeat;x+=140)cloud(x,24+(Math.floor(x/140)%3)*16);}
-            else {var step=index===1?160:120;for(var x=ox-step;x<ox+repeat;x+=step){ctx.fillStyle=index===1?th.hillFar:th.hill;hill(x-(index===1?20:0),base+(index===1?6:22),index===1?96:68,index===1?38:28);}}
-          }
-        }
-        ctx=old; backdropCache[key]=c;
-      }
-      var drift=index===0?6:0, offset=PixelCamera.snap(-((cam*rate+clock*drift)%repeat),view.S);
-      if(name==="caverns"&&index===0)ctx.globalAlpha=0.72+0.2*Math.sin(clock*2);
-      ctx.drawImage(c,offset,0); ctx.drawImage(c,offset+repeat,0);
-      if(name==="caverns"&&index===0)ctx.globalAlpha=1;
-    }
-    getLayer(0,0.1); getLayer(1,0.25); getLayer(2,0.45);
+  function drawBackdrop(name,cam) {
+    PixelBackdrop.draw(ctx,name,cam,{w:view.width,h:view.height},clock,getPitColumns());
   }
   /* ---------- entities ---------- */
   var PAL_GEM = { C: "#7ef3ff", W: "#ffffff", D: "#0d5f72" };
@@ -646,7 +452,7 @@
     if (view.offY) ctx.fillRect(0,0,view.pxW,view.offY);
     if (view.offX) ctx.fillRect(0,view.offY,view.offX,view.bandPx);
     if (view.offX) ctx.fillRect(view.offX+view.width*view.S,view.offY,view.pxW-view.offX-view.width*view.S,view.bandPx);
-    var activeTheme = THEME[theme()] || THEME.meadow;
+    var activeTheme = themeColors();
     if (view.portrait && view.bandPx < view.pxH) {
       var pkey=theme()+":"+view.pxW+":"+view.pxH+":"+view.offY;
       var panel=panelCache[pkey];
@@ -689,6 +495,7 @@
     ctx.save();
     ctx.translate(0, view.height - VIEW_H);
     drawTiles();
+    PixelBackdrop.drawFront(ctx,theme(),renderCamX,{w:view.width,h:view.height},clock,floorSurface,getPitColumns(),frontOccupied,floorChar);
     drawEntities(flow.screen === "title");
     ctx.restore();
     if (flow.screen !== "title") hud();

@@ -553,9 +553,56 @@ test("a touched gem scores 100 and every 100 gems awards a life", () => {
   assert.equal(st.score, 100, "only the gem score was added");
 });
 
+test("LEVELS holds the three spec levels with their names and themes", () => {
+  assert.equal(P.LEVELS.length, 3, "three levels");
+  assert.deepEqual(
+    P.LEVELS.map((l) => [l.name, l.theme]),
+    [
+      ["Meadow", "meadow"],
+      ["Caverns", "caverns"],
+      ["Sky Isles", "sky"],
+    ]
+  );
+});
+
+// The seven solid legend characters, and the biggest step up the spec allows.
+const SOLID_CHARS = new Set(["#", "B", "?", "P", "U"]);
+const MAX_STEP_UP = 3;
+
+// The topmost solid row of a column, considering only ground rows (the builder
+// puts floating platforms higher up, at row 9).
+function groundTop(rows, x) {
+  for (let y = 10; y < ROWS; y++) {
+    if (SOLID_CHARS.has(rows[y][x])) return y;
+  }
+  return null;
+}
+
+// Contiguous runs of columns that have ground, as {from, to, top}.
+function groundRuns(rows) {
+  const width = rows[0].length;
+  const runs = [];
+  let run = null;
+  for (let x = 0; x < width; x++) {
+    const top = groundTop(rows, x);
+    if (top === null) {
+      if (run) runs.push(run);
+      run = null;
+      continue;
+    }
+    if (run && run.top === top && run.to === x - 1) run.to = x;
+    else {
+      if (run) runs.push(run);
+      run = { from: x, to: x, top };
+    }
+  }
+  if (run) runs.push(run);
+  return runs;
+}
+
 test("every LEVELS entry is well formed", () => {
   assert.equal(P.TILE, 16);
-  assert.ok(P.LEVELS.length >= 1);
+  assert.equal(P.LEVELS.length, 3);
   for (const level of P.LEVELS) {
     assert.equal(level.rows.length, ROWS, level.name + " rows");
     assert.equal(new Set(level.rows.map((r) => r.length)).size, 1, level.name + " widths");
@@ -580,6 +627,180 @@ test("every LEVELS entry is well formed", () => {
     }
     assert.ok(maxStreak <= 4, level.name + ": bottom gap " + maxStreak + " > 4");
   }
+});
+
+test("every level carries the required items, gems and enemies", () => {
+  for (const level of P.LEVELS) {
+    const flat = level.rows.join("");
+    const count = (ch) => flat.split(ch).length - 1;
+    assert.ok(count("?") >= 6, level.name + ": " + count("?") + " spark blocks < 6");
+    assert.ok(count("P") >= 2, level.name + ": " + count("P") + " Sprout blocks < 2");
+    assert.ok(count("o") >= 30, level.name + ": " + count("o") + " gems < 30");
+    assert.ok(
+      count("g") + count("b") >= 6,
+      level.name + ": " + (count("g") + count("b")) + " enemies < 6"
+    );
+  }
+
+  // The characters used anywhere are only the documented legend.
+  const LEGEND = new Set([".", "#", "B", "?", "P", "U", "o", "g", "b", "^", "S", "F"]);
+  for (const level of P.LEVELS) {
+    for (const ch of level.rows.join("")) {
+      assert.equal(LEGEND.has(ch), true, level.name + ": illegal tile '" + ch + "'");
+    }
+  }
+});
+
+test("level difficulties follow the spec", () => {
+  const rowsOf = (i) => P.LEVELS[i].rows;
+  const countIn = (rows, ch) => rows.join("").split(ch).length - 1;
+
+  // Level 1 is gentle: only 2-tile gaps and no spikes.
+  const bottomRow = (rows) => rows[ROWS - 1];
+  const maxBottomGap = (rows) => {
+    let best = 0;
+    let streak = 0;
+    for (const ch of bottomRow(rows)) {
+      streak = ch === "." ? streak + 1 : 0;
+      best = Math.max(best, streak);
+    }
+    return best;
+  };
+  assert.equal(maxBottomGap(rowsOf(0)), 2, "Meadow sticks to 2-tile gaps");
+  assert.equal(countIn(rowsOf(0), "^"), 0, "Meadow has no spikes");
+
+  // Level 2 has a low ceiling and ground spikes, never more than 3 in a row.
+  assert.ok(countIn(rowsOf(1), "^") > 0, "Caverns has spikes");
+  assert.ok(countIn(rowsOf(1), "#") > 0);
+  let spikeRun = 0;
+  let worstSpikeRun = 0;
+  for (const ch of rowsOf(1).join("")) {
+    spikeRun = ch === "^" ? spikeRun + 1 : 0;
+    worstSpikeRun = Math.max(worstSpikeRun, spikeRun);
+  }
+  assert.ok(worstSpikeRun <= 3, "Caverns spike bed " + worstSpikeRun + " > 3 (not jumpable)");
+  // A low ceiling exists: solid tiles in the upper half of the map.
+  assert.ok(
+    rowsOf(1)
+      .slice(0, 9)
+      .some((r) => r.includes("#")),
+    "Caverns has a low ceiling"
+  );
+
+  // Level 3 has many wide gaps and a swarm of Buzzers.
+  const wideGaps = [];
+  let gap = 0;
+  for (const ch of bottomRow(rowsOf(2))) {
+    if (ch === ".") gap += 1;
+    else {
+      if (gap >= 3) wideGaps.push(gap);
+      gap = 0;
+    }
+  }
+  if (gap >= 3) wideGaps.push(gap);
+  assert.ok(wideGaps.length >= 8, "Sky Isles has " + wideGaps.length + " wide gaps");
+  assert.ok(countIn(rowsOf(2), "b") >= 5, "Sky Isles Buzzers " + countIn(rowsOf(2), "b"));
+  assert.ok(
+    rowsOf(2)
+      .slice(9, 12)
+      .some((r) => r.includes("#")),
+    "Sky Isles has floating platforms"
+  );
+});
+
+test("no level steps up more than 3 tiles between neighbouring ground runs", () => {
+  for (const level of P.LEVELS) {
+    const runs = groundRuns(level.rows);
+    for (let i = 1; i < runs.length; i++) {
+      const prev = runs[i - 1];
+      const next = runs[i];
+      const gapWidth = next.from - prev.to - 1;
+      // Only a reachable neighbour counts as a step: beyond a jumpable gap the
+      // level designer is free to change height.
+      if (gapWidth > 4) continue;
+      const up = prev.top - next.top;
+      assert.ok(up <= MAX_STEP_UP, level.name + ": step up " + up + " at column " + next.from);
+    }
+  }
+});
+
+test("every Grumble stands on a solid tile and nothing sits inside solid rock", () => {
+  for (const level of P.LEVELS) {
+    const rows = level.rows;
+    const width = rows[0].length;
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < width; x++) {
+        const ch = rows[y][x];
+        if (ch === "g") {
+          const below = y + 1 < ROWS ? rows[y + 1][x] : ".";
+          assert.equal(SOLID_CHARS.has(below), true, level.name + ": unsupported Grumble at " + x + "," + y);
+        }
+        if (ch === "^") {
+          const below = y + 1 < ROWS ? rows[y + 1][x] : ".";
+          assert.equal(SOLID_CHARS.has(below), true, level.name + ": floating spikes at " + x + "," + y);
+        }
+        if ("S Fogb^o".includes(ch)) {
+          assert.equal(SOLID_CHARS.has(ch), false, level.name + ": solid legend clash");
+        }
+      }
+    }
+  }
+});
+
+test("spark blocks sit 4 tiles above the floor they are reached from", () => {
+  for (const level of P.LEVELS) {
+    const rows = level.rows;
+    const width = rows[0].length;
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < width; x++) {
+        const ch = rows[y][x];
+        if (ch !== "?" && ch !== "P") continue;
+        // The tile directly below a block must be empty (nothing to stand on
+        // inside the rock) and the block must be high enough to bump from.
+        assert.equal(rows[y + 1][x], ".", level.name + ": block at " + x + "," + y + " is buried");
+        assert.ok(y >= 1 && y <= ROWS - 6, level.name + ": block row " + y + " is unreachable");
+        // Somewhere under the block there is a floor to jump from.
+        let floor = null;
+        for (let yy = y + 1; yy < ROWS; yy++) {
+          if (SOLID_CHARS.has(rows[yy][x])) {
+            floor = yy;
+            break;
+          }
+        }
+        assert.ok(floor !== null, level.name + ": no floor under the block at " + x + "," + y);
+        assert.equal(floor - y, 4, level.name + ": block at " + x + "," + y + " is " + (floor - y) + " above its floor");
+      }
+    }
+  }
+});
+
+test("nextLevel walks 0 -> 1 -> 2 and then reports won", () => {
+  const st = P.createGame({ level: 0, lives: 3 });
+  assert.equal(st.level, 0);
+  assert.equal(st.mode, "playing");
+  const seen = [];
+  for (let expected = 1; expected < P.LEVELS.length; expected++) {
+    st.mode = "levelclear";
+    const log = [];
+    P.nextLevel(st);
+    log.push(...st.events.splice(0, st.events.length));
+    assert.equal(st.level, expected, "advanced to level " + expected);
+    assert.equal(st.mode, "playing", "level " + expected + " is playing");
+    assert.equal(st.time, 300, "fresh clock for level " + expected);
+    assert.equal(log.length, 0, "no event when a real level loads");
+    assert.equal(st.player.big, false);
+    seen.push(P.LEVELS[st.level].name);
+  }
+  assert.deepEqual(seen, ["Caverns", "Sky Isles"]);
+
+  // Clearing the last level ends the game.
+  st.mode = "levelclear";
+  const log = [];
+  P.nextLevel(st);
+  log.push(...st.events.splice(0, st.events.length));
+  assert.equal(st.mode, "won");
+  assert.equal(st.level, P.LEVELS.length - 1, "the index stays on the last level");
+  assert.ok(log.includes("won"), "the won event fired");
 });
 
 test("standing still on ground stays on ground", () => {

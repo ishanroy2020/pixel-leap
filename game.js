@@ -28,28 +28,269 @@
 
   const SOLID = { "#": true, B: true, "?": true, P: true, U: true };
 
+  // Construction limits from the "Levels" section of SPEC.md.
+  const MAX_GAP = 4;
+  const MAX_STEP = 3;
+  const MAX_SPIKES = 3;
+  const BLOCKS_ABOVE = 4; // spark blocks sit 4 rows above the floor they are reached from
+  const FLOOR_MIN = 3;
+  const FLOOR_MAX = VIEW_TILES_H - 2; // floor 13 leaves ground tiles in rows 13 and 14
+
+  // Deterministic level builder: start with empty sky, then apply the segments
+  // left to right with a running column cursor and a current floor row.
+  function buildRows(width, segments) {
+    const rows = [];
+    for (let y = 0; y < VIEW_TILES_H; y++) rows.push(new Array(width).fill("."));
+    const set = (x, y, ch) => {
+      if (x < 0 || x >= width || y < 0 || y >= VIEW_TILES_H) return;
+      rows[y][x] = ch;
+    };
+    const at = (seg) => seg.at || 0;
+
+    let cursor = 0;
+    let floor = FLOOR_MAX;
+    for (const seg of segments) {
+      if (seg.start) {
+        set(cursor + at(seg), floor - 1, "S");
+      } else if (seg.beacon) {
+        set(cursor + at(seg), floor - 1, "F");
+      } else if (seg.flat !== undefined) {
+        for (let x = cursor; x < cursor + seg.flat; x++) {
+          for (let y = floor; y < VIEW_TILES_H; y++) set(x, y, "#");
+        }
+        cursor += seg.flat;
+      } else if (seg.gap !== undefined) {
+        cursor += Math.min(seg.gap, MAX_GAP);
+      } else if (seg.step !== undefined) {
+        const d = Math.max(-MAX_STEP, Math.min(MAX_STEP, seg.step));
+        floor = Math.max(FLOOR_MIN, Math.min(FLOOR_MAX, floor + d));
+      } else if (seg.blocks !== undefined) {
+        const y = floor - BLOCKS_ABOVE;
+        for (let i = 0; i < seg.blocks.length; i++) {
+          if (seg.blocks[i] !== ".") set(cursor + at(seg) + i, y, seg.blocks[i]);
+        }
+      } else if (seg.gems !== undefined) {
+        const y = seg.row === undefined ? floor - 1 : seg.row;
+        for (let i = 0; i < seg.gems; i++) set(cursor + at(seg) + i, y, "o");
+      } else if (seg.enemy !== undefined) {
+        const flyer = seg.enemy === "b";
+        set(cursor + at(seg), flyer ? floor - 3 : floor - 1, flyer ? "b" : "g");
+      } else if (seg.spikes !== undefined) {
+        const n = Math.min(seg.spikes, MAX_SPIKES);
+        for (let i = 0; i < n; i++) set(cursor + at(seg) + i, floor - 1, "^");
+      } else if (seg.platform !== undefined) {
+        for (let i = 0; i < seg.platform; i++) set(cursor + at(seg) + i, seg.row, "#");
+      } else if (seg.ceiling !== undefined) {
+        for (let x = cursor; x < cursor + seg.ceiling; x++) {
+          for (let y = 0; y <= seg.row; y++) set(x, y, "#");
+        }
+      }
+    }
+    return rows.map((r) => r.join(""));
+  }
+
+  // Level 1, Meadow: gentle. Only 2-tile gaps, two low plateaus, no spikes.
+  // Each region lists its decorations first (offsets from the region's left
+  // edge) and then the ground run they stand on.
+  const MEADOW_SEGMENTS = [
+    { start: true, at: 2 },
+    { gems: 3, at: 5 },
+    { flat: 12 }, // 12
+    { gap: 2 },
+    { enemy: "g", at: 6 },
+    { gems: 4, at: 10 },
+    { blocks: "??", at: 14 },
+    { flat: 16 }, // 30
+    { gap: 2 },
+    { step: -2 },
+    { gems: 5, at: 1 },
+    { enemy: "b", at: 9 },
+    { enemy: "g", at: 12 },
+    { flat: 14 }, // 46
+    { step: 2 },
+    { blocks: "P?", at: 2 },
+    { gems: 4, at: 5 },
+    { enemy: "g", at: 11 },
+    { flat: 14 }, // 60
+    { gap: 2 },
+    { enemy: "g", at: 3 },
+    { gems: 3, at: 6 },
+    { blocks: "?", at: 5 },
+    { platform: 4, row: 9, at: 10 },
+    { gems: 4, row: 8, at: 10 },
+    { flat: 16 }, // 78
+    { gap: 2 },
+    { gems: 4, at: 1 },
+    { blocks: "?P", at: 6 },
+    { enemy: "b", at: 11 },
+    { flat: 14 }, // 94
+    { gap: 2 },
+    { enemy: "g", at: 3 },
+    { gems: 5, at: 6 },
+    { flat: 14 }, // 110
+    { gap: 2 },
+    { step: -3 },
+    { gems: 5, at: 0, row: 9 },
+    { blocks: "?", at: 7 },
+    { enemy: "b", at: 10 },
+    { flat: 12 }, // 124
+    { step: 3 },
+    { gap: 2 },
+    { enemy: "g", at: 3 },
+    { gems: 4, at: 6 },
+    { blocks: "?", at: 12 },
+    { flat: 16 }, // 142
+    { gap: 2 },
+    { gems: 5, at: 0 },
+    { enemy: "b", at: 6 },
+    { blocks: "P", at: 5 },
+    { platform: 5, row: 9, at: 8 },
+    { gems: 3, row: 8, at: 9 },
+    { flat: 14 }, // 158
+    { gap: 2 },
+    { enemy: "g", at: 3 },
+    { gems: 4, at: 6 },
+    { flat: 14 }, // 174
+    { gap: 2 },
+    { gems: 5, at: 0 },
+    { enemy: "g", at: 8 },
+    { beacon: true, at: 12 },
+    { flat: 16 }, // 192
+  ];
+
+  // Level 2, Caverns: low rock ceilings overhead and spike beds on the cave
+  // floor (never more than three in a row, and never under a low ceiling that
+  // would cap the jump, so every bed is clearable).
+  const CAVERN_SEGMENTS = [
+    { start: true, at: 2 },
+    { gems: 3, at: 5 },
+    { flat: 12 }, // 12
+    { gap: 2 },
+    { ceiling: 16, row: 7 },
+    { enemy: "g", at: 3 },
+    { spikes: 3, at: 7 },
+    { gems: 2, at: 12, row: 11 },
+    { flat: 16 }, // 30
+    { gap: 3 },
+    { blocks: "??", at: 1 },
+    { enemy: "g", at: 6 },
+    { gems: 5, at: 8 },
+    { flat: 16 }, // 49
+    { gap: 2 },
+    { enemy: "g", at: 2 },
+    { blocks: "P?", at: 5 },
+    { gems: 4, at: 9 },
+    { flat: 14 }, // 65
+    { gap: 2 },
+    { step: -3 },
+    { gems: 4, at: 0 },
+    { blocks: "?", at: 6 },
+    { enemy: "g", at: 9 },
+    { flat: 14 }, // 81
+    { step: 3 },
+    { gap: 3 },
+    { ceiling: 18, row: 8 },
+    { enemy: "g", at: 2 },
+    { gems: 3, at: 9, row: 11 },
+    { flat: 18 }, // 102
+    { gap: 2 },
+    { blocks: "?P", at: 2 },
+    { enemy: "g", at: 5 },
+    { gems: 5, at: 7 },
+    { flat: 16 }, // 120
+    { gap: 3 },
+    { enemy: "b", at: 2 },
+    { gems: 4, at: 4 },
+    { spikes: 2, at: 9 },
+    { flat: 16 }, // 139
+    { gap: 2 },
+    { ceiling: 14, row: 7 },
+    { spikes: 3, at: 2 },
+    { enemy: "g", at: 8 },
+    { gems: 3, at: 11, row: 11 },
+    { flat: 14 }, // 155
+    { gap: 2 },
+    { enemy: "g", at: 3 },
+    { blocks: "??", at: 6 },
+    { gems: 5, at: 9 },
+    { flat: 18 }, // 175
+    { gap: 2 },
+    { gems: 4, at: 0 },
+    { enemy: "b", at: 5 },
+    { beacon: true, at: 9 },
+    { flat: 15 }, // 192
+  ];
+
+  // Level 3, Sky Isles: long floating runs separated by 3 and 4 tile gaps with
+  // one-tile-thick platforms and a lot of Buzzers.
+  const SKY_SEGMENTS = [
+    { start: true, at: 2 },
+    { gems: 3, at: 5 },
+    { flat: 12 }, // 12
+    { gap: 3 },
+    { enemy: "b", at: 1 },
+    { gems: 4, at: 3 },
+    { platform: 5, row: 9, at: 8 },
+    { gems: 4, row: 8, at: 8 },
+    { flat: 14 }, // 29
+    { gap: 4 },
+    { platform: 6, row: 9, at: 0 },
+    { gems: 3, row: 8, at: 1 },
+    { enemy: "b", at: 8 },
+    { flat: 12 }, // 45
+    { gap: 3 },
+    { step: -2 },
+    { enemy: "g", at: 2 },
+    { blocks: "??", at: 5 },
+    { gems: 4, at: 8 },
+    { flat: 14 }, // 62
+    { gap: 4 },
+    { step: 2 },
+    { enemy: "b", at: 2 },
+    { gems: 5, at: 4 },
+    { blocks: "?P", at: 9 },
+    { flat: 14 }, // 80
+    { gap: 4 },
+    { enemy: "g", at: 1 },
+    { platform: 5, row: 9, at: 4 },
+    { gems: 4, row: 8, at: 4 },
+    { enemy: "b", at: 9 },
+    { blocks: "?", at: 12 },
+    { flat: 14 }, // 98
+    { gap: 2 },
+    { step: -3 },
+    { gems: 4, at: 0 },
+    { enemy: "g", at: 5 },
+    { flat: 14 }, // 114
+    { step: 3 },
+    { gap: 4 },
+    { enemy: "b", at: 1 },
+    { gems: 5, at: 3 },
+    { platform: 6, row: 9, at: 9 },
+    { gems: 3, row: 8, at: 10 },
+    { flat: 18 }, // 136
+    { gap: 4 },
+    { platform: 4, row: 9, at: 0 },
+    { gems: 3, row: 8, at: 0 },
+    { enemy: "b", at: 6 },
+    { blocks: "P", at: 9 },
+    { flat: 14 }, // 154
+    { gap: 3 },
+    { blocks: "??", at: 2 },
+    { enemy: "g", at: 6 },
+    { gems: 5, at: 8 },
+    { flat: 18 }, // 175
+    { gap: 3 },
+    { gems: 4, at: 0 },
+    { enemy: "b", at: 5 },
+    { beacon: true, at: 9 },
+    { flat: 16 }, // 194
+  ];
+
   const LEVELS = [
-    {
-      name: "Meadow",
-      theme: "meadow",
-      rows: [
-        "........................................................................................................................",
-        "........................................................................................................................",
-        "........................................................................................................................",
-        "........................................................................................................................",
-        "........................................................................................................................",
-        ".....................................................................................b..................................",
-        ".......o......................o.....................o...................................................................",
-        "............................................................?...........................................................",
-        "........................................................................................................................",
-        ".......?..............?...P...?...............BBB...?......o..o...............?...................?.....................",
-        "...............o.........................o................######...o.........................o..........................",
-        "...S......o.o....o.og...oo.......o.o.........o....g....o..######.......o..o.......o.o...o.......o....o...o.o...o..o.F...",
-        "##############..########################..########################..########################..##########################",
-        "##############..########################..########################..########################..##########################",
-        "##############..########################..########################..########################..##########################",
-      ],
-    },
+    { name: "Meadow", theme: "meadow", rows: buildRows(192, MEADOW_SEGMENTS) },
+    { name: "Caverns", theme: "caverns", rows: buildRows(192, CAVERN_SEGMENTS) },
+    { name: "Sky Isles", theme: "sky", rows: buildRows(194, SKY_SEGMENTS) },
   ];
 
   function parseLevel(rows) {

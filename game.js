@@ -496,6 +496,7 @@
       p.onGround = false;
       state.coyote = 0;
       state.jumpBuffer = 0;
+      state.events.push("jump");
     }
     if (state.prevJump && !input.jump && p.vy < 0) {
       p.vy = Math.max(p.vy, -JUMP_V * JUMP_CUT);

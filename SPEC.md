@@ -17,14 +17,27 @@ original sound effects and music made with the Web Audio API.
 - Three levels: 1 Meadow (green hills, day sky), 2 Caverns (dark blue cave, glowing crystals),
   3 Sky Isles (sunset sky, floating islands with gaps).
 
-## Files
+## Files and owners (design 2026-11-15; each file has exactly one owner at a time)
 
-| File | Who | What |
+| File | Owner | What |
 | --- | --- | --- |
-| `game.js` | stage 1 | All game rules. No DOM, no canvas, no audio, no timers. Runs in a browser and in Node. |
-| `tests/game.test.js` | stage 1 | `node --test` acceptance tests for game.js (Node built-in `node:test` and `node:assert/strict` only). |
-| `index.html` | stage 2 | Canvas renderer, input, screens, HUD, audio, storage. Loads `game.js` with `<script src="game.js">`. |
-| `manifest.webmanifest`, `README.md` | stage 3 | Installable web app manifest and the project README. |
+| `game.js` | Qwen (stage 1, merged); Codex C2 adds only the "jump" event line | All game rules. No DOM, canvas, audio or timers. Runs in a browser and in Node. |
+| `tests/game.test.js` | Qwen (merged) | Engine acceptance tests. |
+| `index.html` | Qwen (2a, then Q5a/Q5b integration) | Canvas, scaling, loop, drawing, HUD; later wires the modules below. |
+| `audio.js`, `tests/audio.test.js`, `tests/jump-event.test.js` | Codex (C2) | global `PixelAudio`: original chiptune SFX per event + looping melody per theme, mute. |
+| `controls.js` | Qwen (Q3) | global `PixelControls`: keyboard + multi-touch input, on-screen buttons. |
+| `screens.js` | Qwen (Q4) | global `PixelScreens`: title/pause/levelclear/gameover/won flow, best score storage. |
+| `tests/controls.test.js`, `tests/screens.test.js`, `tests/page.test.js`, `tests/originality.test.js`, `tools/smoke.mjs` | Codex (C1) | Acceptance tests for Qwen's modules and the page; headless-Chrome smoke tool. |
+| `tools/make-assets.js`, `icon-180.png`, `icon-192.png`, `icon-512.png`, `og.png`, `manifest.webmanifest`, `README.md`, `tests/assets.test.js` | Codex (C3) | PNG icon/share-image generator (Node, zlib), web app manifest, README. |
+
+Every module uses the game.js wrapper `(function (root) { ... })(globalThis)`, sets `root.<Name>` and `module.exports`
+under Node, and touches no DOM at load time. Tests use only `node:test` and `node:assert/strict`.
+The exact module interfaces are in `docs/PLAN.md`.
+
+## Portrait layout (design decision)
+The view is 15 tiles (240 game px) tall. In portrait, where that would leave fewer than 240 game px of width, the view
+width is fixed at 240 game px and the game is letterboxed: the play area sits in the upper part of the screen and the
+on-screen controls go in the band below it. In landscape the view width follows the aspect ratio.
 
 ## game.js interface (exact)
 

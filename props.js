@@ -6,7 +6,7 @@
     n = Math.imul(n ^ (n >>> 13), 0xc2b2ae35);
     return (n ^ (n >>> 16)) >>> 0;
   }
-  function plan(levelTiles, seed, entities) {
+  function plan(levelTiles, seed, entities, gems) {
     var rows = levelTiles || [],
       h = rows.length,
       w = rows.reduce(function (m, r) {
@@ -18,11 +18,12 @@
       out = [],
       theme = typeof seed === "string" ? seed : "meadow",
       num = typeof seed === "number" ? seed : 1;
-    if (Array.isArray(entities)) {
-      entities.forEach(function (e) {
-        occupied[Math.floor(e.x / 16) + ":" + Math.floor(e.y / 16)] = 1;
-      });
-    }
+    function markSpan(px, width, margin) {var a=Math.floor(px/16)-margin,b=Math.floor((px+width-1)/16)+margin;for(var c=a;c<=b;c++)occupied[c]=1;}
+    if (Array.isArray(entities)) entities.forEach(function (e) {
+      var width=+e.w||16;markSpan(+e.x||0,width,1);
+      if(e.kind==="grumble"||e.type==="grumble"||e.patrol){var foot=Math.floor(((+e.y||0)+(+e.h||16))/16),lo=Math.floor((+e.x||0)/16),hi=Math.floor(((+e.x||0)+width-1)/16);while(lo>0&&rows[foot]&&rows[foot][lo-1]==="#")lo--;while(hi+1<w&&rows[foot]&&rows[foot][hi+1]==="#")hi++;for(var c=lo-1;c<=hi+1;c++)occupied[c]=1;}
+    });
+    (gems||[]).forEach(function(g){if(!g.taken)markSpan(+g.x||0,16,1);});
     for (var y = 0; y < h; y++) {
       for (var x = 0; x < w; x++) {
         var ch = rows[y][x] || ".";
@@ -54,13 +55,15 @@
         }
       }
       if (
-        top < 1 || rows[top - 1][x] !== "." || occupied[x + ":" + (top - 1)]
+        top < 1 || rows[top - 1][x] !== "." || occupied[x]
       ) continue;
+      if(occupied[x])continue;
       var safe = true;
       for (var d = -2; d <= 2; d++) if (pits[x + d] || haz[x + d]) safe = false;
       if (!safe || hash(num + x * 977 + top * 31) % 3 !== 0) continue;
-      var k = hash(num * 13 + x * 43 + top) % kinds.length, kind = kinds[k];
-      out.push({ kind: kind, x: x * 16, y: top * 16 - 8 });
+      var allowed=kinds.filter(function(kind){return kind!=="stalactite";});
+      var k = hash(num * 13 + x * 43 + top) % allowed.length, kind = allowed[k];
+      out.push({ kind: kind, x: x * 16, y: top * 16 - 24, col:x, floor:top*16 });
       x += 2;
     }
     return out;

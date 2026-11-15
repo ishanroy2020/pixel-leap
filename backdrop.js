@@ -55,7 +55,7 @@
   function hill(ctx, x, y, w, h, color) {
     ctx.fillStyle = color;
     for (var i = 0; i < h; i++) {
-      var half = Math.round(w / 2 * (1 - (i / h) * (i / h)));
+      var u = i / Math.max(1, h - 1), half = Math.round(w / 2 * Math.sqrt(Math.max(0, 1 - u * u)));
       ctx.fillRect(
         Math.round(x + w / 2 - half),
         Math.round(y + i),
@@ -97,7 +97,8 @@
     }
     ctx.save();
     ctx.drawImage(sky, 0, 0);
-    var layers = [.1, .25, .45], base = H * .67;
+    var layers = [.1, .25, .45], base = H * .67,
+      visible = spans(Math.ceil(W / 16) + 4, (pitColumns || []).map(function(c){return Array.isArray(c)?c:[c,c+1];}).map(function(c){return [c[0]-Math.floor(camX/16)+1,c[1]-Math.floor(camX/16)+1];}));
     layers.forEach(function (rate, layer) {
       var step = layer === 0 ? 122 : layer === 1 ? 102 : 86,
         off = -((camX * rate) % step);
@@ -109,7 +110,7 @@
         if (theme === "caverns") {
           ctx.fillStyle = layer === 0 ? "#31447b" : p.h[layer];
           circle(ctx, sx + 20, base + layer * 18, 12 + layer * 4, p.h[layer]);
-          hill(ctx, sx, base + layer * 11, step, 36 + layer * 10, p.h[layer]);
+        visible.forEach(function(v){var vx0=(Math.floor(camX/16)-1+v[0])*16-camX,vx1=(Math.floor(camX/16)-1+v[1])*16-camX,hw=step*1.6+(Math.floor(wx/step)%3-1)*9,hh=36+layer*10+(Math.floor(wx/step)%3)*4;hill(ctx,Math.max(sx,vx0),base+layer*11,Math.min(sx+hw,vx1)-Math.max(sx,vx0),hh,p.h[layer]);});
           if (layer === 0) {
             var pulse = .5 + .5 * Math.sin(t * 2 + wx * .05);
             ctx.fillStyle = "rgba(110,240,255," + (pulse * .7) + ")";
@@ -127,23 +128,11 @@
             );
           }
         } else {
-          hill(ctx, sx, base + layer * 13, step, 36 + layer * 10, p.h[layer]);
+          visible.forEach(function(v){var vx0=(Math.floor(camX/16)-1+v[0])*16-camX,vx1=(Math.floor(camX/16)-1+v[1])*16-camX,hw=step*1.6+(Math.floor(wx/step)%3-1)*9,hh=36+layer*10+(Math.floor(wx/step)%3)*4;hill(ctx,Math.max(sx,vx0),base+layer*13,Math.min(sx+hw,vx1)-Math.max(sx,vx0),hh,p.h[layer]);});
           if (layer === 0) {
             var drift = (t * 3 + wx * .03) % 25;
-            circle(
-              ctx,
-              sx + 27 + drift,
-              38 + (Math.floor(wx / step) % 3) * 16,
-              8,
-              "rgba(255,255,255,.8)",
-            );
-            circle(
-              ctx,
-              sx + 38 + drift,
-              42 + (Math.floor(wx / step) % 3) * 16,
-              10,
-              "rgba(199,122,160,.85)",
-            );
+            if(theme === "meadow") { ctx.globalAlpha=1;ctx.fillStyle="#ffffff";ctx.fillRect(sx+18+drift,36,31,10);circle(ctx,sx+27+drift,40,8,"#ffffff");circle(ctx,sx+40+drift,40,8,"#ffffff");ctx.fillStyle="#dff0ff";ctx.fillRect(sx+18+drift,44,31,4);ctx.globalAlpha=alpha; }
+            else if(theme === "sky") {ctx.globalAlpha=1;ctx.fillStyle="#ffc2a0";ctx.fillRect(sx+18+drift,36,31,10);circle(ctx,sx+27+drift,40,8,"#ffc2a0");circle(ctx,sx+40+drift,40,8,"#ffc2a0");ctx.fillStyle="#c77aa0";ctx.fillRect(sx+18+drift,44,31,4);ctx.globalAlpha=alpha;}
           }
           if (
             theme === "sky" && layer === 0 &&
@@ -157,33 +146,18 @@
       }
       ctx.restore();
     });
-    // Mask landscape layers by world columns; gaps in the floor are absolute pit columns.
-    if (pitColumns && pitColumns.length) {
-      ctx.save();
-      ctx.fillStyle = theme === "meadow"
-        ? "#1a0f0a"
-        : theme === "caverns"
-        ? "#05061a"
-        : "rgba(58,36,80,.85)";
-      pitColumns.forEach(function (c) {
-        var a = Array.isArray(c) ? c[0] : c,
-          b = Array.isArray(c) ? c[1] : c + 1;
-        var x0 = a * 16 - camX, x1 = b * 16 - camX;
-        ctx.fillRect(x0, base, Math.max(0, x1 - x0), H - base);
-        ctx.fillStyle = p.h[1];
-        ctx.fillRect(x0, base, Math.max(0, x1 - x0), 1);
-      });
-      ctx.restore();
-    }
     ctx.restore();
   }
-  function drawFront(ctx, theme, camX, view, t) {
+  function drawFront(ctx, theme, camX, view, t, floorHeights, pitColumns) {
     var p = P[theme] || P.meadow,
       W = view.w || view.width,
       H = view.h || view.height,
       y = H - 43;
     ctx.save();
-    for (var sx = -16 - (camX * 1.15 % 64); sx < W + 16; sx += 64) {
+    for (var sx = -16 - (camX % 64); sx < W + 16; sx += 64) {
+      var worldX=Math.floor((sx+camX)/16), floorY=typeof floorHeights==="function"?floorHeights(worldX):null;
+      if(pitColumns&&pitColumns.indexOf(worldX)>=0)continue;
+      if(floorY!=null)y=floorY-27;
       if (theme === "caverns") {
         ctx.fillStyle = p.front;
         for (var i = 0; i < 4; i++) {
@@ -207,11 +181,12 @@
       } else {
         ctx.fillStyle = p.front;
         for (var b = 0; b < 4; b++) {
-          var bx = sx + b * 8,
-            sway = Math.round(Math.sin(t * 2 + bx * .08) * 2);
-          ctx.fillRect(bx, y + 18 + sway, 2, 10);
-          ctx.fillRect(bx - 2, y + 16 + sway, 3, 2);
-          ctx.fillRect(bx + 1, y + 14 + sway, 3, 2);
+          var bx = sx + b * 8, col=Math.floor((bx+camX)/16), fy=typeof floorHeights==="function"?floorHeights(col):null,
+            sway = Math.round(Math.sin(t * 2 + bx * .08) * 2), by=fy==null?y:fy-30;
+          if(pitColumns&&pitColumns.indexOf(col)>=0)continue;
+          ctx.fillRect(bx, by + 18 + sway, 2, 10);
+          ctx.fillRect(bx - 2, by + 16 + sway, 3, 2);
+          ctx.fillRect(bx + 1, by + 14 + sway, 3, 2);
         }
       }
     }

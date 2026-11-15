@@ -150,7 +150,7 @@
   var hitStop = 0;
   var renderCamX = 0;
   var spriteIds = new WeakMap(), nextSpriteId = 1;
-  var propArt=Object.create(null), plannedProps=null, plannedFor=null;
+  var propArt=Object.create(null), pitArt=Object.create(null), plannedProps=null, plannedFor=null;
   var panelCache = Object.create(null);
 
   function theme() {
@@ -194,7 +194,7 @@
     ctx.save();ctx.translate(px+8,py+h);ctx.scale((p.facing<0?-1:1)*Math.round(pose.sx*16)/16,Math.round(pose.sy*16)/16);ctx.translate(-8,-h);
     var frameCanvas=pipBakeCache.get(pose.name,pose.frame,big);ctx.drawImage(frameCanvas,0,0);ctx.restore();
     ctx.fillStyle=PixelSprites.PAL.S;
-    for(var j=0;j<6;j++){var pt=pose.scarf[j],tx=PixelCamera.snap(pt.x-cam,view.S),ty=PixelCamera.snap(pt.y,view.S);ctx.fillStyle=j<4?PixelSprites.PAL.S:PixelSprites.PAL.Q;ctx.fillRect(tx,ty,Math.max(1,2-Math.floor(j/3)),1);}
+    for(var j=1;j<6;j++){var a=pose.scarf[j-1],b=pose.scarf[j],dx=b.x-a.x,dy=b.y-a.y,n=Math.max(1,Math.ceil(Math.hypot(dx,dy))),thick=j<4?2:1;ctx.fillStyle=j<4?PixelSprites.PAL.S:PixelSprites.PAL.Q;for(var k=0;k<=n;k++){var tx=PixelCamera.snap(a.x+dx*k/n-cam,view.S),ty=PixelCamera.snap(a.y+dy*k/n,view.S);ctx.fillRect(tx,ty,thick,thick);}}
   }
   var LIFE_ICON = ["DDD.DDD", "DWWDWWD", "DWWWWWD", "DWWWWWD", ".DDDDD.", "..DDD..", "...D..."];
 
@@ -265,24 +265,27 @@
     }
     return out;
   }
+  var cachedPitId="", cachedPits=[];
+  function getPitColumns(){var id=state.level+":"+state.width+":"+state.height;if(id!==cachedPitId){cachedPitId=id;cachedPits=pitColumns();}return cachedPits;}
+  function floorSurface(col){for(var y=0;y<state.height;y++)if(solidAt(col,y))return y*TILE;return null;}
   function drawTiles() {
     var cam=renderCamX, t0=Math.max(0,Math.floor(cam/TILE)-1), t1=Math.min(state.width-1,Math.ceil((cam+view.width)/TILE));
-    var pits=pitColumns(), pitMap=Object.create(null); pits.forEach(function(x){pitMap[x]=1;});
+    var pits=getPitColumns(), pitMap=Object.create(null); pits.forEach(function(x){pitMap[x]=1;});
     for(var ty=0;ty<state.height;ty++) for(var tx=t0;tx<=t1;tx++) {
-      var ch=state.tiles[ty][tx]; if(ch===".") continue;
+      var ch=state.tiles[ty][tx]; if(ch==="."&&!pitMap[tx]) continue;
       var dx=PixelCamera.snap(tx*TILE-cam,view.S),dy=ty*TILE;
-      if(pitMap[tx] && ty>=state.height-2) PixelTiles.draw(ctx,"pit",dx,dy,tx,ty,theme(),clock,solidAt);
+      if(pitMap[tx] && ty>=state.height-2) continue;
       else PixelTiles.draw(ctx,ch,dx,dy,tx,ty,theme(),clock,solidAt);
     }
     // The empty columns are the pits. Paint the void from the floor line down.
     var pitTop=(state.height-2)*TILE;
-    pits.forEach(function(tx){var x=PixelCamera.snap(tx*TILE-cam,view.S),g=ctx.createLinearGradient(0,pitTop,0,view.height);g.addColorStop(0,theme()==="meadow"?"#4e321f":theme()==="caverns"?"#171c3a":"#6f5a8e");g.addColorStop(1,theme()==="meadow"?"#1a0f0a":theme()==="caverns"?"#05061a":"rgba(58,36,80,.85)");ctx.fillStyle=g;ctx.fillRect(x,pitTop,TILE,view.height-pitTop);ctx.fillStyle=themeColors().topHi;ctx.fillRect(x,pitTop,TILE,1);});
+    pits.forEach(function(tx){var key="pit:"+theme(),art=pitArt[key];if(!art)pitArt[key]=art=PixelTiles.bakeTile("pit",theme());ctx.drawImage(art,PixelCamera.snap(tx*TILE-cam,view.S),pitTop-4);});
     var id=state.level+":"+state.width+":"+state.height;
-    if(plannedFor!==id){plannedProps=PixelProps.plan(state.tiles,theme(),[state.player].concat(state.enemies||[],state.items||[]));plannedFor=id;}
-    (plannedProps||[]).forEach(function(prop){var sx=prop.x-cam;if(sx < -32 || sx > view.width+32)return;var key=theme()+":"+prop.kind;if(!propArt[key])propArt[key]=PixelProps.bake(prop.kind,theme());ctx.drawImage(propArt[key],PixelCamera.snap(sx,view.S),prop.y-8);});
+    if(plannedFor!==id){plannedProps=PixelProps.plan(state.tiles,theme(),[state.player].concat(state.enemies||[],state.items||[]),state.gemList);plannedFor=id;}
+    (plannedProps||[]).forEach(function(prop){var sx=prop.x-cam;if(sx < -32 || sx > view.width+32)return;var key=theme()+":"+prop.kind;if(!propArt[key])propArt[key]=PixelProps.bake(prop.kind,theme());ctx.drawImage(propArt[key],PixelCamera.snap(sx,view.S),prop.floor-24);});
   }
   function drawBackdrop(name,cam) {
-    PixelBackdrop.draw(ctx,name,cam,{w:view.width,h:view.height},clock,pitColumns());
+    PixelBackdrop.draw(ctx,name,cam,{w:view.width,h:view.height},clock,getPitColumns());
   }
   /* ---------- entities ---------- */
   var PAL_GEM = { C: "#7ef3ff", W: "#ffffff", D: "#0d5f72" };
@@ -490,7 +493,7 @@
     ctx.save();
     ctx.translate(0, view.height - VIEW_H);
     drawTiles();
-    PixelBackdrop.drawFront(ctx,theme(),renderCamX,{w:view.width,h:view.height},clock);
+    PixelBackdrop.drawFront(ctx,theme(),renderCamX,{w:view.width,h:view.height},clock,floorSurface,getPitColumns());
     drawEntities(flow.screen === "title");
     ctx.restore();
     if (flow.screen !== "title") hud();

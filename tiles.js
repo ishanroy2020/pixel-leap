@@ -54,6 +54,7 @@
       p = palettes[theme] || palettes.meadow,
       n = neighbours || {};
     x.save();
+    if (x.translate) x.translate(0, 4);
     if (ch === "#") {
       var v = (variant === undefined ? 0 : variant) >>> 0,
         seed = v % 4,
@@ -112,14 +113,11 @@
         x.fillStyle = p.dark;
         x.fillRect(15, top ? 3 : 0, 1, 13);
       }
-      x.fillStyle = p.dirt;
+      x.fillStyle = p.dirt[seed];
       if (top && left) x.fillRect(0, 0, 2, 1);
       if (top && right) x.fillRect(14, 0, 2, 1);
       if (above) {
-        x.fillStyle = p.deep;
-        x.fillRect(0, 16, 16, 2);
-        x.fillStyle = p.dark;
-        x.fillRect(0, 18, 16, 1);
+        /* The tile below an overhang carries its own top shadow. */
       }
     } else if (ch === "B") {
       x.fillStyle = p.brick;
@@ -229,11 +227,11 @@
       : ch === "?" || ch === "P"
       ? Math.floor((t || 0) * 8) % 4
       : 0;
-    var key = theme + ":" + ch + ":" + v + ":" +
-      [ne.up, ne.left, ne.right, above].join("");
+    var mask=(ne.up?1:0)|(ne.left?2:0)|(ne.right?4:0)|(above?8:0),chCode=ch.charCodeAt(0)||0;
+    var key = theme + ":" + chCode + ":" + v + ":" + mask;
     var cache = draw.cache || (draw.cache = Object.create(null));
     if (!cache[key]) cache[key] = bake(ch, theme, v, ne, makeCanvas);
-    ctx.drawImage(cache[key], x, y - 2);
+    ctx.drawImage(cache[key], x, y - 4);
   }
   draw.clearCache = function () {
     draw.cache = Object.create(null);

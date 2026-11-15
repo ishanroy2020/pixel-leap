@@ -24,7 +24,7 @@
       prevGround=ground;return out;
     }
     var oldRoot=null;
-    function advanceScarf(p,input,dt,drawPos){dt=Math.max(0,Math.min(.05,+dt||0));var vx=+p.vx||0,vy=+p.vy||0,speed=Math.abs(vx),facing=p.facing||1,root=drawPos?scarfRoot(drawPos,facing,!!p.big):scarfRoot(p,facing,!!p.big),rx=oldRoot?root.x-oldRoot.x:0,ry=oldRoot?root.y-oldRoot.y:0;oldRoot=root;scarf[0].x=root.x;scarf[0].y=root.y;phase+=dt*9;for(var j=1;j<6;j++){var q=scarf[j],prev=scarf[j-1],dx=q.x-prev.x,dy=q.y-prev.y,len=Math.hypot(dx,dy)||1,back=-Math.sign(vx)*Math.min(2.4,speed/150*2.4);q.x+=rx*.72;q.y+=ry*.72;dx=q.x-prev.x;dy=q.y-prev.y;len=Math.hypot(dx,dy)||1;dx=dx/len*2.5;dy=dy/len*2.5;q.x=prev.x+dx+back*.35;q.y=prev.y+dy+.28-vy*.003+Math.sin(phase-j*.55)*.6;}}
+    function advanceScarf(p,input,dt,drawPos){dt=Math.max(0,Math.min(.05,+dt||0));var vx=+p.vx||0,vy=+p.vy||0,speed=Math.abs(vx),facing=p.facing||1,root=drawPos?scarfRoot(drawPos,facing,!!p.big):scarfRoot(p,facing,!!p.big),rx=oldRoot?root.x-oldRoot.x:0,ry=oldRoot?root.y-oldRoot.y:0;oldRoot=root;scarf[0].x=root.x;scarf[0].y=root.y;phase+=dt*9;for(var j=1;j<6;j++){var q=scarf[j],prev=scarf[j-1],back=-Math.sign(vx)*Math.min(2.4,speed/150*2.4);q.x+=rx*.72;q.y+=ry*.72;var rest=-facing*.7,dx=q.x-prev.x+rest+back*.35,dy=q.y-prev.y;var len=Math.hypot(dx,dy)||1;dx=dx/len*2.5;dy=dy/len*2.5;q.x=prev.x+dx;q.y=prev.y+dy+.12-vy*.003+Math.sin(phase-j*.55)*.12;}}
     var lastAirVy=0;return {update:update,advanceScarf:advanceScarf};
   }
   var api={createPipAnimator:createPipAnimator,findFloor:findFloor,scarfRoot:scarfRoot};root.PixelAnim=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;

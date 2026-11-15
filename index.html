@@ -267,7 +267,9 @@
   }
   var cachedPitId="", cachedPits=[];
   function getPitColumns(){var id=state.level+":"+state.width+":"+state.height;if(id!==cachedPitId){cachedPitId=id;cachedPits=pitColumns();}return cachedPits;}
-  function floorSurface(col){for(var y=0;y<state.height;y++)if(solidAt(col,y))return y*TILE;return null;}
+  function floorSurface(col){for(var y=0;y<state.height;y++)if(state.tiles[y][col]==="#")return y*TILE;return null;}
+  function floorChar(col){for(var y=0;y<state.height;y++)if(solidAt(col,y))return state.tiles[y][col];return null;}
+  function frontOccupied(col){var x0=col*TILE,x1=x0+TILE,all=[state.player].concat(state.enemies||[],state.items||[]);for(var i=0;i<all.length;i++){var e=all[i];if(e&&x0<e.x+(e.w||16)&&x1>e.x)return true;}for(var j=0;j<(state.gemList||[]).length;j++){var g=state.gemList[j];if(!g.taken&&x0<g.x+8&&x1>g.x-8)return true;}return false;}
   function drawTiles() {
     var cam=renderCamX, t0=Math.max(0,Math.floor(cam/TILE)-1), t1=Math.min(state.width-1,Math.ceil((cam+view.width)/TILE));
     var pits=getPitColumns(), pitMap=Object.create(null); pits.forEach(function(x){pitMap[x]=1;});
@@ -279,7 +281,7 @@
     }
     // The empty columns are the pits. Paint the void from the floor line down.
     var pitTop=(state.height-2)*TILE;
-    pits.forEach(function(tx){var key="pit:"+theme(),art=pitArt[key];if(!art)pitArt[key]=art=PixelTiles.bakeTile("pit",theme());ctx.drawImage(art,PixelCamera.snap(tx*TILE-cam,view.S),pitTop-4);});
+    pits.forEach(function(tx){var key="pit:"+theme()+":"+Math.max(0,view.height-pitTop),art=pitArt[key];if(!art){art=document.createElement("canvas");art.width=TILE;art.height=Math.max(1,view.height-pitTop);var ac=art.getContext("2d"),grad=ac.createLinearGradient(0,0,0,art.height),pal=PixelTiles.palettes[theme()]||PixelTiles.palettes.meadow;grad.addColorStop(0,pal.dark);grad.addColorStop(1,theme()==="meadow"?"#1a0f0a":theme()==="caverns"?"#05061a":"rgba(58,36,80,.85)");ac.fillStyle=grad;ac.fillRect(0,0,TILE,art.height);ac.fillStyle=pal.hi;ac.fillRect(0,0,TILE,1);pitArt[key]=art;}ctx.drawImage(art,PixelCamera.snap(tx*TILE-cam,view.S),pitTop);});
     var id=state.level+":"+state.width+":"+state.height;
     if(plannedFor!==id){plannedProps=PixelProps.plan(state.tiles,theme(),[state.player].concat(state.enemies||[],state.items||[]),state.gemList);plannedFor=id;}
     (plannedProps||[]).forEach(function(prop){var sx=prop.x-cam;if(sx < -32 || sx > view.width+32)return;var key=theme()+":"+prop.kind;if(!propArt[key])propArt[key]=PixelProps.bake(prop.kind,theme());ctx.drawImage(propArt[key],PixelCamera.snap(sx,view.S),prop.floor-24);});
@@ -493,7 +495,7 @@
     ctx.save();
     ctx.translate(0, view.height - VIEW_H);
     drawTiles();
-    PixelBackdrop.drawFront(ctx,theme(),renderCamX,{w:view.width,h:view.height},clock,floorSurface,getPitColumns());
+    PixelBackdrop.drawFront(ctx,theme(),renderCamX,{w:view.width,h:view.height},clock,floorSurface,getPitColumns(),frontOccupied,floorChar);
     drawEntities(flow.screen === "title");
     ctx.restore();
     if (flow.screen !== "title") hud();

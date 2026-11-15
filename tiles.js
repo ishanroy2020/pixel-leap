@@ -116,9 +116,7 @@
       x.fillStyle = p.dirt[seed];
       if (top && left) x.fillRect(0, 0, 2, 1);
       if (top && right) x.fillRect(14, 0, 2, 1);
-      if (above) {
-        /* The tile below an overhang carries its own top shadow. */
-      }
+      if (above) { x.fillStyle = p.dark; x.fillRect(0, 0, 16, 2); }
     } else if (ch === "B") {
       x.fillStyle = p.brick;
       x.fillRect(0, 0, 16, 16);
@@ -236,11 +234,15 @@
   draw.clearCache = function () {
     draw.cache = Object.create(null);
   };
+  function floorSurface(rows,col){for(var y=0;y<rows.length;y++)if(rows[y]&&rows[y][col]==='#')return y*16;return null;}
   root.PixelTiles = {
     bakeTile: bake,
     draw: draw,
     hash: hash,
     palettes: palettes,
+    floorSurface: floorSurface,
+    tileBakeOffset: function(y){return y-4;},
+    pitFillRect: function(x,floor,viewBottom){return {x:x,y:floor,w:16,h:Math.max(0,viewBottom-floor)};},
     clearCache: draw.clearCache,
   };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -21,7 +21,7 @@
     function markSpan(px, width, margin) {var a=Math.floor(px/16)-margin,b=Math.floor((px+width-1)/16)+margin;for(var c=a;c<=b;c++)occupied[c]=1;}
     if (Array.isArray(entities)) entities.forEach(function (e) {
       var width=+e.w||16;markSpan(+e.x||0,width,1);
-      if(e.kind==="grumble"||e.type==="grumble"||e.patrol){var foot=Math.floor(((+e.y||0)+(+e.h||16))/16),lo=Math.floor((+e.x||0)/16),hi=Math.floor(((+e.x||0)+width-1)/16);while(lo>0&&rows[foot]&&rows[foot][lo-1]==="#")lo--;while(hi+1<w&&rows[foot]&&rows[foot][hi+1]==="#")hi++;for(var c=lo-1;c<=hi+1;c++)occupied[c]=1;}
+
     });
     (gems||[]).forEach(function(g){if(!g.taken)markSpan(+g.x||0,16,1);});
     for (var y = 0; y < h; y++) {
@@ -46,6 +46,7 @@
       : theme === "sky"
       ? ["cloud", "pennant"]
       : ["flower", "bush", "fence", "signpost"];
+    var allowed = kinds.filter(function(kind){return kind!=="stalactite";});
     for (var x = 2; x < w - 2; x++) {
       var top = -1;
       for (var y = 0; y < h; y++) {
@@ -60,11 +61,18 @@
       if(occupied[x])continue;
       var safe = true;
       for (var d = -2; d <= 2; d++) if (pits[x + d] || haz[x + d]) safe = false;
-      if (!safe || hash(num + x * 977 + top * 31) % 3 !== 0) continue;
-      var allowed=kinds.filter(function(kind){return kind!=="stalactite";});
+      if (!safe || hash(num + x * 977 + top * 31) % 2 !== 0) continue;
       var k = hash(num * 13 + x * 43 + top) % allowed.length, kind = allowed[k];
       out.push({ kind: kind, x: x * 16, y: top * 16 - 24, col:x, floor:top*16 });
-      x += 2;
+    }
+    /* Keep long authored levels visually dressed while retaining all safety gates. */
+    if(out.length<6)for(var fx=2;fx<w-2&&out.length<6;fx++){
+      var ft=-1;for(var fy=0;fy<h;fy++)if(rows[fy]&&rows[fy][fx]==="#"){ft=fy;break;}
+      if(ft<1||rows[ft-1][fx]!=="."||occupied[fx])continue;
+      var ok=true;for(var fd=-2;fd<=2;fd++)if(pits[fx+fd]||haz[fx+fd])ok=false;
+      if(!ok||out.some(function(q){return Math.abs(q.col-fx)<3;}))continue;
+      var fk=hash(num*13+fx*43+ft)%allowed.length;
+      out.push({kind:allowed[fk],x:fx*16,y:ft*16-24,col:fx,floor:ft*16});
     }
     return out;
   }

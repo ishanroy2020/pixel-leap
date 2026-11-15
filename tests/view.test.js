@@ -18,7 +18,11 @@ test("view sizing matches the documented contract and maximal scale", () => {
     assert.equal(v.offY + v.h * v.S, v.offY + v.bandPx, "bottom game row meets the play-band bottom");
     if (v.portrait) assert.ok((pxW/(v.S+1)) < 176 || (v.bandPx/(v.S+1)) < 224);
     else assert.ok(pxH/(v.S+1) < 224);
-    assert.equal(v.offY + v.bandPx, v.offY + v.bandPx); // band starts after top inset
+    assert.ok(v.offY + v.bandPx <= pxH, "play band fits within the device-pixel screen");
+    if (v.portrait) {
+      const panelTop=v.offY+v.bandPx, panelHeight=pxH-panelTop;
+      assert.ok(panelHeight >= 0 && panelTop+panelHeight === pxH, "panel covers the remaining screen below the play band");
+    }
   }
 });
 test("safe insets offset the band and preserve HUD usable width", () => {

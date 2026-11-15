@@ -123,6 +123,7 @@
     view.pxH = Math.max(1, Math.round(cssH * dpr));
     canvas.width = view.pxW;
     canvas.height = view.pxH;
+    backdropCache=Object.create(null); gradientCache=Object.create(null); panelCache=Object.create(null); tileCache=Object.create(null);
     var sized = PixelView.compute(view.pxW, view.pxH, dpr, safe);
     view.S = sized.S;
     view.width = sized.w;
@@ -141,6 +142,7 @@
   var previous = null;
   var hitStop = 0;
   var renderCamX = 0;
+  var spriteIds = new WeakMap(), nextSpriteId = 1;
 
   function theme() {
     return (PixelLeap.LEVELS[state.level] || { theme: "meadow" }).theme;
@@ -148,7 +150,9 @@
   /* ---------- sprite blitting from character maps ---------- */
   var spriteCache = Object.create(null);
   function blit(map, gx, gy, pal, flipX) {
-    var key = map.join("/") + JSON.stringify(pal) + (flipX ? ":f" : ":n");
+    var mapId=spriteIds.get(map); if(!mapId){mapId=nextSpriteId++;spriteIds.set(map,mapId);}
+    var palId=spriteIds.get(pal); if(!palId){palId=nextSpriteId++;spriteIds.set(pal,palId);}
+    var key = mapId+":"+palId+(flipX ? ":f" : ":n");
     var cached = spriteCache[key];
     if (!cached) {
       cached = document.createElement("canvas"); cached.width = map[0].length; cached.height = map.length;
@@ -160,19 +164,6 @@
       spriteCache[key]=cached;
     }
     ctx.drawImage(cached,gx,gy);
-    return;
-    var h = map.length;
-    for (var r = 0; r < h; r++) {
-      var row = map[r];
-      var w = row.length;
-      for (var c = 0; c < w; c++) {
-        var col = flipX ? (w - 1 - c) : c;
-        var fill = pal[row.charAt(col)];
-        if (!fill) continue;
-        ctx.fillStyle = fill;
-        ctx.fillRect(gx + c, gy + r, 1, 1);
-      }
-    }
   }
   var PAL_PIP = { T: "#2fd8c8", D: "#0f7f7a", W: "#ffffff", B: "#101623", O: "#ff8a2b", Y: "#c95f12" };
   var PAL_ROCK = { R: "#8d97a8", D: "#4a5364", L: "#c2cad8", E: "#1b2130", M: "#2b3342" };
@@ -366,7 +357,7 @@
   var tileCache = Object.create(null);
   function drawTile(ch, dx, dy, tx, ty) {
     var v1=tx%60, v2=ty%20;
-    var anim=ch==="?"||ch==="P" ? Math.floor(clock*6+tx+ty)%4 : ch==="F" ? Math.floor(clock*8)%16 : 0;
+    var anim=ch==="?"||ch==="P" ? Math.floor(clock*6+tx+ty)%4 : ch==="F" ? Math.round((Math.sin(clock*4)+1)*4) : 0;
     var key=theme()+":"+ch+":"+v1+":"+v2+":"+anim;
     var c=tileCache[key];
     if(!c){
@@ -490,12 +481,37 @@
   }
   var backdropCache=Object.create(null);
   function drawBackdrop(name, cam) {
-    var key=name+":"+view.width+":"+view.height, layer=backdropCache[key];
-    if(!layer){
-      layer=document.createElement("canvas"); layer.width=Math.max(1,Math.ceil(view.width)); layer.height=Math.max(1,Math.ceil(view.height));
-      var old=ctx; ctx=layer.getContext("2d"); drawBackdropArt(name,0); ctx=old; backdropCache[key]=layer;
+    var th=THEME[name]||THEME.meadow, repeat=Math.max(1,Math.ceil(view.width)), stripWidth=repeat*2;
+    ctx.drawImage(gradientCanvas(name,view.width,view.height,th.sky[0],th.sky[1]),0,0);
+    var base=view.height-3*TILE;
+    function getLayer(index, rate) {
+      var key=name+":"+view.width+":"+view.height+":"+index, c=backdropCache[key];
+      if(!c){
+        c=document.createElement("canvas"); c.width=stripWidth; c.height=view.height;
+        var old=ctx; ctx=c.getContext("2d");
+        for(var copy=0;copy<2;copy++){
+          var ox=copy*repeat;
+          if(name==="sky"){
+            if(index===0){ctx.fillStyle="rgba(255,225,190,0.45)"; for(var x=ox;x<ox+repeat;x+=170) cloud(x,20+((Math.floor(x/170)%2)*18));}
+            else if(index===1){for(var x=ox-150;x<ox+repeat;x+=150){ctx.fillStyle=th.hillFar;ctx.fillRect(x,base-8,58,10);ctx.fillStyle=th.hill;ctx.fillRect(x+6,base,46,8);}}
+            else {ctx.fillStyle="rgba(255,170,90,0.35)";for(var y=0;y<4;y++)ctx.fillRect(ox,view.height*.34+16+y*14,repeat,4);}
+          } else if(name==="caverns"){
+            if(index===0){ctx.fillStyle="rgba(126,243,255,0.48)";for(var x=ox;x<ox+repeat;x+=90)crystal(x,26+(Math.floor(x/90)%3)*24,12,32);}
+            else if(index===1){ctx.fillStyle="rgba(120,140,220,0.22)";for(var x=ox;x<ox+repeat;x+=70)ctx.fillRect(x,base+18,26,6);}
+            else {ctx.fillStyle="rgba(60,70,130,0.5)";for(var x=ox;x<ox+repeat;x+=64)ctx.fillRect(x,view.height-2*TILE,30,2*TILE);}
+          } else {
+            if(index===0){ctx.fillStyle="rgba(255,255,255,0.85)";for(var x=ox;x<ox+repeat;x+=140)cloud(x,24+(Math.floor(x/140)%3)*16);}
+            else {var step=index===1?160:120;for(var x=ox-step;x<ox+repeat;x+=step){ctx.fillStyle=index===1?th.hillFar:th.hill;hill(x-(index===1?20:0),base+(index===1?6:22),index===1?96:68,index===1?38:28);}}
+          }
+        }
+        ctx=old; backdropCache[key]=c;
+      }
+      var drift=index===0?6:0, offset=PixelCamera.snap(-((cam*rate+clock*drift)%repeat),view.S);
+      if(name==="caverns"&&index===0)ctx.globalAlpha=0.72+0.2*Math.sin(clock*2);
+      ctx.drawImage(c,offset,0); ctx.drawImage(c,offset+repeat,0);
+      if(name==="caverns"&&index===0)ctx.globalAlpha=1;
     }
-    ctx.drawImage(layer,0,0);
+    getLayer(0,0.1); getLayer(1,0.25); getLayer(2,0.45);
   }
   /* ---------- entities ---------- */
   var PAL_GEM = { C: "#7ef3ff", W: "#ffffff", D: "#0d5f72" };

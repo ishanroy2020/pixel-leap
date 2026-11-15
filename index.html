@@ -80,6 +80,8 @@
 <script src="screens.js"></script>
 <script src="camera.js"></script>
 <script src="view.js"></script>
+<script src="sprites.js"></script>
+<script src="anim.js"></script>
 <script>
 "use strict";
 (function () {
@@ -165,55 +167,23 @@
     }
     ctx.drawImage(cached,gx,gy);
   }
-  var PAL_PIP = { T: "#2fd8c8", D: "#0f7f7a", W: "#ffffff", B: "#101623", O: "#ff8a2b", Y: "#c95f12" };
+  var pipBakeCache=PixelSprites.createCache(function(w,h){var c=document.createElement("canvas");c.width=w;c.height=h;return c;});
+  var pipAnimator=PixelAnim.createPipAnimator(Math.random), pipShadow=null;
   var PAL_ROCK = { R: "#8d97a8", D: "#4a5364", L: "#c2cad8", E: "#1b2130", M: "#2b3342" };
   var PAL_FLY = { Y: "#f5d43c", D: "#3a2f10", W: "#e9f6ff", K: "#1b2130" };
   var PAL_LEAF = { G: "#5fd24a", D: "#21701f", L: "#a5ef7a", K: "#8a5a2b" };
 
-  /* Pip: round teal body, big white eyes, long orange scarf (drawn from below upward). */
-  var PIP_HEAD = [
-    "....DDDD....",
-    "..DDTTTTDD..",
-    ".DTTTTTTTTD.",
-    "DTTWWTTWWTTD",
-    "DTTWWTTWWTTD",
-    "DTTBWTTTBWTD",
-    "DOOOOOOOOOOD",
-    "DYOOOOOOOOYD"
-  ];
-  var PIP_BODY = [
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD."
-  ];
-  var PIP_TORSO_BIG = [
-    ".DTTTTTTTTD.",
-    "DTTTTTTTTTTD",
-    "DTTTTTTTTTTD",
-    "DTTTTTTTTTTD",
-    "DTTTTTTTTTTD",
-    "DOOOOOOOOOOD",
-    "DYOOOOOOOOYD",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD.",
-    ".DTTTTTTTTD."
-  ];
-  var LEG_STAND = ["DDTTDDDDTTDD", ".DDD.DD.DDD."];
-  var LEG_RUN = ["DDTTDDDDTTDD", "DDD.DDDD.DDD"];
-  var LEG_RUN2 = ["DDTTDDDDTTDD", ".DDDDDDDDDD."];
-  var LEG_TUCK = ["DDTTDDDDTTDD", "DD.DD..DD.DD"];
-  var PIP_LEGS = [LEG_RUN, LEG_STAND, LEG_RUN2];
-  var PIP_SMALL_TOP = PIP_HEAD.concat(PIP_BODY);
-  var PIP_BIG_TOP = PIP_HEAD.concat(PIP_TORSO_BIG);
-  function pipRows(frame, big, tuck) {
-    var top = big ? PIP_BIG_TOP : PIP_SMALL_TOP;
-    var legs = tuck ? LEG_TUCK : PIP_LEGS[frame % PIP_LEGS.length];
-    return top.concat(legs);
+  var frameEvents=[], frameElapsed=0;
+  function drawPipSprite(p,pp,cam){
+    var big=!!p.big,h=big?28:18,px=PixelCamera.snap(pp.x-cam+((p.w||12)-16)/2,view.S),py=PixelCamera.snap(pp.y+(p.h||14)-h,view.S);
+    var pose=pipAnimator.update(p,ctl.input?ctl.input():null,frameElapsed,frameEvents,state.mode,{x:px+cam,y:py});
+    if(!pipShadow){pipShadow=document.createElement('canvas');pipShadow.width=32;pipShadow.height=10;var sc=pipShadow.getContext('2d'),g=sc.createRadialGradient(16,5,1,16,5,15);g.addColorStop(0,'rgba(0,0,0,.25)');g.addColorStop(1,'rgba(0,0,0,0)');sc.fillStyle=g;sc.fillRect(0,0,32,10);}
+    var floorY=PixelAnim.findFloor(state,p.x+(p.w||12)/2,p.y+(p.h||14)),above=floorY===null?64:Math.max(0,floorY-(p.y+p.h)),shadowAlpha=.25*Math.max(0,1-above/64);
+    if(floorY!==null&&shadowAlpha>0){var shadowScale=Math.max(0,1-above/64);ctx.globalAlpha=shadowAlpha/.25;ctx.drawImage(pipShadow,PixelCamera.snap(pp.x-cam-4*shadowScale,view.S),PixelCamera.snap(floorY,view.S),24*shadowScale,7*shadowScale);ctx.globalAlpha=1;}
+    ctx.save();ctx.translate(px+8,py+h);ctx.scale((p.facing<0?-1:1)*Math.round(pose.sx*16)/16,Math.round(pose.sy*16)/16);ctx.translate(-8,-h);
+    var frameCanvas=pipBakeCache.get(pose.name,pose.frame,big);ctx.drawImage(frameCanvas,0,0);ctx.restore();
+    ctx.fillStyle=PixelSprites.PAL.S;
+    for(var j=0;j<6;j++){var pt=pose.scarf[j],tx=PixelCamera.snap(pt.x-cam,view.S),ty=PixelCamera.snap(pt.y,view.S);ctx.fillStyle=j<4?PixelSprites.PAL.S:PixelSprites.PAL.Q;ctx.fillRect(tx,ty,Math.max(1,2-Math.floor(j/3)),1);}
   }
   var LIFE_ICON = ["DDD.DDD", "DWWDWWD", "DWWWWWD", "DWWWWWD", ".DDDDD.", "..DDD..", "...D..."];
 
@@ -571,12 +541,8 @@
     }
     if (skipPlayer) return;
     var p = state.player; var pp = interp.player;
-    var frameIdx = 1;
-    if (p.onGround && Math.abs(p.vx) > 8) frameIdx = Math.floor(clock * 9) % 2 === 0 ? 0 : 2;
-    var px = PixelCamera.snap(pp.x - cam, view.S);
-    var py = PixelCamera.snap(pp.y, view.S);
     if (p.invuln > 0 && Math.floor(clock * 12) % 2 === 0) return;
-    blit(pipRows(p.onGround ? frameIdx : 1, p.big, !p.onGround), px, py, PAL_PIP, p.facing < 0);
+    drawPipSprite(p,pp,cam);
   }
   function grumbleSprite(gx, gy, e) {
     blit(ROCK, gx, gy, PAL_ROCK, e.vx > 0);
@@ -650,6 +616,7 @@
     audio.playEvents(q);
     for (var i = 0; i < q.length; i++) {
       events.push(q[i]);
+      frameEvents.push(q[i]);
       if (q[i] === "stomp") hitStop = Math.max(hitStop, 0.06);
       else if (q[i] === "hurt") hitStop = Math.max(hitStop, 0.08);
       else if (q[i] === "die") hitStop = Math.max(hitStop, 0.12);
@@ -750,6 +717,7 @@
     var elapsed = now - last;
     last = now;
     if (elapsed > 0.25) elapsed = 0.25;
+    frameElapsed=Math.min(.05,elapsed);frameEvents.length=0;
     if (document.hidden) {
       flow.pause();
       ctl.reset();
@@ -799,6 +767,7 @@
           var beforePlayer = { x: state.player.x, y: state.player.y };
           var entityCount = state.enemies.length + state.items.length;
           PixelLeap.step(state, playerInput, Math.min(STEP, MAX_DT));
+          pipAnimator.advanceScarf(state.player,playerInput,STEP);
           PixelCamera.update(renderCamera, state.player, { w: view.width }, state.width * PixelLeap.TILE, STEP);
           if (entityCount !== state.enemies.length + state.items.length) previous = PixelCamera.capture(state);
           if (state.events.indexOf("die") !== -1 || Math.abs(state.player.x - beforePlayer.x) > 32 || Math.abs(state.player.y - beforePlayer.y) > 32) {

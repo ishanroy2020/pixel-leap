@@ -1,0 +1,10 @@
+"use strict";
+const test=require('node:test'),assert=require('node:assert/strict'),S=require('../sprites.js');
+test('all Pip frames have expected dimensions and palette keys',()=>{
+ for(const [name,count] of Object.entries(S.FRAMES))for(let i=0;i<count;i++)for(const big of [false,true]){const rows=S.pip(name,i,big);assert.equal(rows.length,big?28:18);assert.ok(rows.every(r=>r.length===16));for(const r of rows)for(const k of r)assert.ok(Object.hasOwn(S.PAL,k),`unknown key ${k}`);}
+});
+test('frame counts match the Pip table',()=>assert.deepEqual(S.FRAMES,{idle:2,blink:1,run:6,rise:1,apex:1,fall:2,land:1,skid:1,hurt:1,dead:2,win:2}));
+test('cache bakes each key once',()=>{let n=0;const c=S.createCache((w,h)=>{n++;return {w,h,getContext(){return {fillRect(){}}}}});c.get('run',2,false);c.get('run',2,false);c.get('run',2,true);assert.equal(n,2);});
+test('six run poses have distinct silhouettes',()=>{const frames=Array.from({length:6},(_,i)=>S.pip('run',i,false).join('\n'));for(let i=0;i<6;i++)for(let j=i+1;j<6;j++)assert.notEqual(frames[i],frames[j]);});
+test('eyes are 3x4 with 2x2 pupils in the top 40 percent',()=>{for(const big of [false,true]){const rows=S.pip('idle',0,big),top=big?3:1,ey=top+3;for(const x of [4,9]){for(let y=ey;y<ey+4;y++)assert.equal(rows[y].slice(x,x+3).split('').filter(c=>c==='W'||c==='H'||c==='P').length,3);assert.equal(rows[ey+1][x+1],'P');assert.equal(rows[ey+2][x+1],'P');assert.ok((ey+3)/(big?28:18)<.4);}}});
+test('feet connect to the body in every small and big pose',()=>{for(const [name,count] of Object.entries(S.FRAMES))for(let i=0;i<count;i++)for(const big of [false,true]){const rows=S.pip(name,i,big);let bodyEnd=-1,feetStart=rows.length;for(let y=0;y<rows.length;y++)if(rows[y].includes('T')||rows[y].includes('D')||rows[y].includes('H')||rows[y].includes('S'))bodyEnd=y;for(let y=rows.length-1;y>=0;y--)if(rows[y].includes('F')||rows[y].includes('O'))feetStart=y;for(let y=bodyEnd+1;y<feetStart;y++)assert.notEqual(rows[y].replace(/\./g,''),'',`${name} ${i} ${big} gap row ${y}`);}});

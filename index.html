@@ -74,12 +74,12 @@
 <body>
 <canvas id="game"></canvas>
 <div id="safe-area" aria-hidden="true"></div>
-<script src="view.js"></script>
-<script src="camera.js"></script>
 <script src="game.js"></script>
 <script src="audio.js"></script>
 <script src="controls.js"></script>
 <script src="screens.js"></script>
+<script src="camera.js"></script>
+<script src="view.js"></script>
 <script>
 "use strict";
 (function () {
@@ -112,7 +112,7 @@
   const audio = PixelAudio.createAudio({ muted: PixelScreens.loadMuted() });
 
   function resize() {
-    var dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
+    var dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), 2);
     var cssW = Math.max(1, canvas.clientWidth || window.innerWidth || 320);
     var cssH = Math.max(1, canvas.clientHeight || window.innerHeight || 240);
     view.dpr = dpr;
@@ -146,7 +146,21 @@
     return (PixelLeap.LEVELS[state.level] || { theme: "meadow" }).theme;
   }
   /* ---------- sprite blitting from character maps ---------- */
+  var spriteCache = Object.create(null);
   function blit(map, gx, gy, pal, flipX) {
+    var key = map.join("/") + JSON.stringify(pal) + (flipX ? ":f" : ":n");
+    var cached = spriteCache[key];
+    if (!cached) {
+      cached = document.createElement("canvas"); cached.width = map[0].length; cached.height = map.length;
+      var c = cached.getContext("2d");
+      for (var cr=0; cr<map.length; cr++) for (var cc=0; cc<map[cr].length; cc++) {
+        var color=pal[map[cr].charAt(flipX ? map[cr].length-1-cc : cc)];
+        if (color) { c.fillStyle=color; c.fillRect(cc,cr,1,1); }
+      }
+      spriteCache[key]=cached;
+    }
+    ctx.drawImage(cached,gx,gy);
+    return;
     var h = map.length;
     for (var r = 0; r < h; r++) {
       var row = map[r];
@@ -271,7 +285,7 @@
     caverns: { sky: ["#0a1030", "#161e42"], dirt: "#2c3358", dark: "#171c36", top: "#4a5aa0", topHi: "#7d8fd8", hill: "#1d2450", hillFar: "#2a3468" },
     sky: { sky: ["#ff9a4a", "#ffd9a0"], dirt: "#6a5a86", dark: "#3b3157", top: "#c9a0ff", topHi: "#f0d8ff", hill: "#8a6ab0", hillFar: "#b98fd6" }
   };
-  function drawTile(ch, dx, dy, tx, ty) {
+  function drawTileArt(ch, dx, dy, tx, ty) {
     var th = THEME[theme()] || THEME.meadow;
     if (ch === "#") {
       ctx.fillStyle = th.dirt;
@@ -349,6 +363,19 @@
       ctx.fillRect(dx + 6, dy - 9, 4, 4);
     }
   }
+  var tileCache = Object.create(null);
+  function drawTile(ch, dx, dy, tx, ty) {
+    var v1=tx%60, v2=ty%20;
+    var anim=ch==="?"||ch==="P" ? Math.floor(clock*6+tx+ty)%4 : ch==="F" ? Math.floor(clock*8)%16 : 0;
+    var key=theme()+":"+ch+":"+v1+":"+v2+":"+anim;
+    var c=tileCache[key];
+    if(!c){
+      c=document.createElement("canvas"); c.width=TILE+16; c.height=TILE+22;
+      var old=ctx; ctx=c.getContext("2d"); drawTileArt(ch,8,11,tx,ty); ctx=old;
+      tileCache[key]=c;
+    }
+    ctx.drawImage(c,dx-8,dy-11);
+  }
   function drawTiles() {
     var cam = renderCamX;
     var t0 = Math.max(0, Math.floor(cam / TILE) - 1);
@@ -358,29 +385,24 @@
       for (var tx = t0; tx <= t1; tx++) {
         var ch = row[tx];
         if (ch === ".") continue;
-        drawTile(ch, Math.round(tx * TILE - cam), ty * TILE, tx, ty);
+        drawTile(ch, PixelCamera.snap(tx * TILE - cam, view.S), ty * TILE, tx, ty);
       }
     }
   }
   /* ---------- parallax backdrop ---------- */
   function hill(x, y, w, h) {
-    x = Math.round(x);
     for (var r = 0; r < h; r++) {
       var t = r / h;
       var half = Math.round((w / 2) * (1 - t * t));
-      ctx.fillRect(x + Math.round(w / 2) - half, y + r, half * 2, 1);
+      ctx.fillRect(x + w / 2 - half, y + r, half * 2, 1);
     }
   }
   function cloud(x, y) {
-    x = Math.round(x);
-    y = Math.round(y);
     ctx.fillRect(x, y + 4, 34, 7);
     ctx.fillRect(x + 6, y, 16, 6);
     ctx.fillRect(x + 22, y + 2, 10, 6);
   }
   function crystal(x, y, w, h) {
-    x = Math.round(x);
-    y = Math.round(y);
     for (var r = 0; r < h; r++) {
       var t = r / h;
       var half = Math.max(1, Math.round((w / 2) * (1 - t)));
@@ -390,15 +412,23 @@
   function spans(step, cam, rate, fn) {
     var off = -((cam * rate + clock * 6) % step);
     var n = Math.ceil(view.width / step) + 1;
-    for (var i = -1; i < n; i++) fn(Math.round(off + i * step), i);
+    for (var i = -1; i < n; i++) fn(PixelCamera.snap(off + i * step, view.S), i);
   }
-  function drawBackdrop(name, cam) {
+  var gradientCache = Object.create(null);
+  var panelCache = Object.create(null);
+  function gradientCanvas(key, w, h, top, bottom) {
+    var cacheKey=key+":"+w+":"+h, c=gradientCache[cacheKey];
+    if (!c) {
+      c=document.createElement("canvas"); c.width=Math.max(1,Math.ceil(w)); c.height=Math.max(1,Math.ceil(h));
+      var cctx=c.getContext("2d"), g=cctx.createLinearGradient(0,0,0,c.height);
+      g.addColorStop(0,top); g.addColorStop(1,bottom); cctx.fillStyle=g; cctx.fillRect(0,0,c.width,c.height);
+      gradientCache[cacheKey]=c;
+    }
+    return c;
+  }
+  function drawBackdropArt(name, cam) {
     var th = THEME[name] || THEME.meadow;
-    var g = ctx.createLinearGradient(0, 0, 0, view.height);
-    g.addColorStop(0, th.sky[0]);
-    g.addColorStop(1, th.sky[1]);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, view.width, view.height);
+    ctx.drawImage(gradientCanvas(name,view.width,view.height,th.sky[0],th.sky[1]),0,0);
     var base = view.height - 3 * TILE;
     if (name === "caverns") {
       spans(90, cam, 0.15, function (x, i) {
@@ -458,6 +488,15 @@
       });
     }
   }
+  var backdropCache=Object.create(null);
+  function drawBackdrop(name, cam) {
+    var key=name+":"+view.width+":"+view.height, layer=backdropCache[key];
+    if(!layer){
+      layer=document.createElement("canvas"); layer.width=Math.max(1,Math.ceil(view.width)); layer.height=Math.max(1,Math.ceil(view.height));
+      var old=ctx; ctx=layer.getContext("2d"); drawBackdropArt(name,0); ctx=old; backdropCache[key]=layer;
+    }
+    ctx.drawImage(layer,0,0);
+  }
   /* ---------- entities ---------- */
   var PAL_GEM = { C: "#7ef3ff", W: "#ffffff", D: "#0d5f72" };
   var GEM = [
@@ -472,24 +511,22 @@
     "...DCCD...",
     "....DD...."
   ];
+  var gemCache=Object.create(null);
   function gemSprite(cx, cy) {
-    /* Rhombus squashed horizontally by a spin cycle so the facet reads as rotating. */
-    var w = 3 + Math.abs(Math.sin(clock * 3.2)) * 7;
-    var h = GEM.length;
-    var gy = Math.round(cy - h / 2);
-    var left = cx - w / 2;
-    var cols = GEM[0].length;
-    for (var r = 0; r < h; r++) {
-      var row = GEM[r];
-      for (var c = 0; c < cols; c++) {
-        var fill = PAL_GEM[row.charAt(c)];
-        if (!fill) continue;
-        var x0 = Math.round(left + (c * w) / cols);
-        var x1 = Math.round(left + ((c + 1) * w) / cols);
-        ctx.fillStyle = fill;
-        ctx.fillRect(x0, gy + r, Math.max(1, x1 - x0), 1);
+    var width=Math.max(3,Math.min(10,Math.round(3+Math.abs(Math.sin(clock*3.2))*7)));
+    var frame=gemCache[width];
+    if(!frame){
+      frame=document.createElement("canvas"); frame.width=width; frame.height=GEM.length;
+      var fc=frame.getContext("2d");
+      for(var r=0;r<GEM.length;r++) for(var c=0;c<GEM[r].length;c++){
+        var color=PAL_GEM[GEM[r].charAt(c)]; if(!color) continue;
+        var x0=Math.round(c*width/GEM[0].length), x1=Math.round((c+1)*width/GEM[0].length);
+        fc.fillStyle=color; fc.fillRect(x0,r,Math.max(1,x1-x0),1);
       }
+      gemCache[width]=frame;
     }
+    var left=PixelCamera.snap(cx-width/2,view.S), top=PixelCamera.snap(cy-GEM.length/2,view.S);
+    ctx.drawImage(frame,left,top);
   }
   function onScreen(x, pad) {
     var cam = renderCamX;
@@ -497,12 +534,13 @@
   }
   function drawEntities(skipPlayer) {
     var cam = renderCamX;
-    var interp = previous ? PixelCamera.blend(previous, PixelCamera.capture(state), Math.max(0, Math.min(1, acc / STEP))) : PixelCamera.capture(state);
+    var alpha = hitStop > 0 ? 1 : Math.max(0, Math.min(1, acc / STEP));
+    var interp = !previous || alpha === 1 ? state : PixelCamera.blend(previous, PixelCamera.capture(state), alpha);
     var i;
     for (i = 0; i < state.gemList.length; i++) {
       var gm = state.gemList[i];
       if (gm.taken || !onScreen(gm.x, 20)) continue;
-      gemSprite(gm.x - cam, gm.y);
+      gemSprite(PixelCamera.snap(gm.x - cam, view.S), PixelCamera.snap(gm.y, view.S));
     }
     for (i = 0; i < state.items.length; i++) {
       var it = state.items[i]; var ip = interp.items[i] || it;
@@ -519,20 +557,20 @@
     var p = state.player; var pp = interp.player;
     var frameIdx = 1;
     if (p.onGround && Math.abs(p.vx) > 8) frameIdx = Math.floor(clock * 9) % 2 === 0 ? 0 : 2;
-    var px = Math.round(PixelCamera.snap(pp.x - cam, view.S));
-    var py = Math.round(PixelCamera.snap(pp.y, view.S));
+    var px = PixelCamera.snap(pp.x - cam, view.S);
+    var py = PixelCamera.snap(pp.y, view.S);
     if (p.invuln > 0 && Math.floor(clock * 12) % 2 === 0) return;
     blit(pipRows(p.onGround ? frameIdx : 1, p.big, !p.onGround), px, py, PAL_PIP, p.facing < 0);
   }
   function grumbleSprite(gx, gy, e) {
-    blit(ROCK, Math.round(gx), Math.round(gy), PAL_ROCK, e.vx > 0);
+    blit(ROCK, gx, gy, PAL_ROCK, e.vx > 0);
   }
   function buzzerSprite(gx, gy, e) {
     var flap = Math.sin((e.t || 0) * Math.PI * 2 / 0.28) > 0;
-    blit(flap ? FLY_DOWN : FLY_UP, Math.round(gx), Math.round(gy) + (flap ? 0 : 5), PAL_FLY, false);
+    blit(flap ? FLY_DOWN : FLY_UP, gx, gy + (flap ? 0 : 5), PAL_FLY, false);
   }
   function sproutSprite(gx, gy) {
-    blit(LEAF, Math.round(gx), Math.round(gy), PAL_LEAF, false);
+    blit(LEAF, gx, gy, PAL_LEAF, false);
   }
 
   /* ---------- HUD and overlays ---------- */
@@ -622,13 +660,17 @@
   function draw() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = "#4aa8ff";
-    ctx.fillRect(0, 0, view.pxW, view.pxH);
+    if (view.offY) ctx.fillRect(0,0,view.pxW,view.offY);
+    if (view.offX) ctx.fillRect(0,view.offY,view.offX,view.bandPx);
+    if (view.offX) ctx.fillRect(view.offX+view.width*view.S,view.offY,view.pxW-view.offX-view.width*view.S,view.bandPx);
     var activeTheme = THEME[theme()] || THEME.meadow;
     if (view.portrait && view.bandPx < view.pxH) {
-      var panel = ctx.createLinearGradient(0, view.bandPx, 0, view.pxH);
-      panel.addColorStop(0, activeTheme.dirt); panel.addColorStop(1, activeTheme.dark);
-      ctx.fillStyle = panel; ctx.fillRect(0, view.bandPx, view.pxW, view.pxH - view.bandPx);
-      ctx.fillStyle = activeTheme.topHi; ctx.fillRect(0, view.bandPx, view.pxW, Math.max(1, view.S));
+      var pkey=theme()+":"+view.pxW+":"+view.pxH+":"+view.offY;
+      var panel=panelCache[pkey];
+      if(!panel){ panel=document.createElement("canvas"); panel.width=view.pxW; panel.height=view.pxH-view.offY-view.bandPx;
+        var pc=panel.getContext("2d"), pg=pc.createLinearGradient(0,0,0,panel.height); pg.addColorStop(0,activeTheme.dirt); pg.addColorStop(1,activeTheme.dark); pc.fillStyle=pg; pc.fillRect(0,0,panel.width,panel.height); panelCache[pkey]=panel; }
+      ctx.drawImage(panel,0,view.offY+view.bandPx);
+      ctx.fillStyle = activeTheme.topHi; ctx.fillRect(0, view.offY+view.bandPx, view.pxW, Math.max(1, view.S));
     }
     ctx.setTransform(view.S, 0, 0, view.S, view.offX, view.offY);
     ctx.imageSmoothingEnabled = false;

@@ -354,3 +354,65 @@ test("setMusic schedules only within 0.25 s of currentTime", () => {
   assert.ok(h.oscs.length > 50, `the loop kept going (${h.oscs.length} notes)`);
   assert.ok(seenStarts === 0);
 });
+
+// The single gain node every voice is wired through.
+function masterGain(h) {
+  const dest = h.ctxs[0].destination;
+  const m = h.gains.find((g) => g.connects.includes(dest));
+  assert.ok(m, "a master gain node exists");
+  return m;
+}
+
+test("muting stops scheduled melody notes and mutes the master gain", () => {
+  const { h, audio } = make();
+  audio.unlock();
+  audio.setMusic("meadow");
+  for (let i = 0; i < 30; i++) {
+    audio.update();
+    h.tick(1 / 60);
+  }
+  const master = masterGain(h);
+  const music = h.oscs.filter((o) => {
+    const g = gainNodeOf(o);
+    return g && g.connects.includes(master);
+  });
+  assert.ok(music.length > 0, "melody notes were scheduled");
+  const t = h.time;
+  // Notes that were still pending at the mute instant, i.e. audible after it.
+  const pending = music.filter((o) => lastStop(o) > t);
+  assert.ok(pending.length > 0, "some notes were scheduled past the mute time");
+
+  const before = h.oscs.length;
+  audio.setMuted(true);
+  assert.equal(audio.isMuted(), true);
+
+  for (const o of pending) {
+    assert.ok(o.stops.length >= 2, "the pending note got a second, earlier stop");
+    assert.ok(lastStop(o) <= t + 1e-9, `note stopped at ${lastStop(o)} <= ${t}`);
+  }
+  const masterSets = master.gain.automation;
+  assert.equal(masterSets[masterSets.length - 1].value, 0, "master gain muted to 0");
+  assert.ok(masterSets[masterSets.length - 1].t <= t + 1e-9, "master muted at once");
+
+  // Nothing new is created while muted, however many frames pass.
+  for (let i = 0; i < 120; i++) {
+    audio.update();
+    h.tick(1 / 60);
+    assert.equal(audio.play("gem"), false, "no sfx while muted");
+  }
+  assert.equal(h.oscs.length, before, "muted created no oscillators");
+
+  // Unmuting restores the level and resumes from the current time, not from the
+  // notes that were skipped while muted.
+  const resumed = h.time;
+  audio.setMuted(false);
+  assert.equal(master.gain.automation[master.gain.automation.length - 1].value, 0.8);
+  h.reset();
+  audio.update();
+  assert.ok(h.oscs.length > 0, "the loop resumes after unmuting");
+  for (const o of h.oscs) {
+    assert.ok(o.starts[0] >= resumed - 1e-9, `resumed note starts at ${o.starts[0]} >= now`);
+    assert.ok(o.starts[0] < resumed + 0.3, "no burst of missed notes");
+  }
+});
+

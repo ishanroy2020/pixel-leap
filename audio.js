@@ -213,20 +213,23 @@
         }
         return null;
       }
-      const v = { osc, gain, start, end, stopped: true, released: false, music: !!isMusic };
+      const v = { osc, gain, start, end, killed: false, released: false, music: !!isMusic };
       voices.push(v);
       return v;
     }
 
-    function stopVoice(v) {
-      if (!v.stopped) {
+    function stopVoice(v, time) {
+      if (!v.killed) {
         try {
-          // Never stop earlier than the scheduled onset.
-          if (v.osc && v.osc.stop) v.osc.stop(Math.max(now(), v.start + 0.005));
+          if (v.osc && v.osc.stop) {
+            // Muting stops everything now; otherwise never earlier than the
+            // scheduled onset, so a voice about to sound is not clipped.
+            v.osc.stop(time !== undefined ? time : Math.max(now(), v.start + 0.005));
+          }
         } catch (e) {
           /* ignore */
         }
-        v.stopped = true;
+        v.killed = true;
       }
       release(v);
       const i = voices.indexOf(v);
@@ -239,7 +242,7 @@
       try {
         ctx = new Ctor();
         master = ctx.createGain();
-        master.gain.setValueAtTime(MASTER_GAIN, now());
+        master.gain.setValueAtTime(muted ? 0 : MASTER_GAIN, now());
         master.connect(ctx.destination);
       } catch (e) {
         ctx = null;
@@ -248,6 +251,17 @@
         return false;
       }
       return true;
+    }
+
+    // Every voice connects through the master gain, so muting there kills sound
+    // even for notes already committed to the audio thread.
+    function setMasterGain(value) {
+      if (!master) return;
+      try {
+        master.gain.setValueAtTime(value, now());
+      } catch (e) {
+        /* ignore */
+      }
     }
 
     function chain(promise) {
@@ -469,13 +483,21 @@
       },
       setMuted(value) {
         try {
-          muted = !!value;
+          const next = !!value;
+          if (next === muted) return;
+          muted = next;
           if (muted) {
-            for (let i = voices.length - 1; i >= 0; i--) {
-              if (!voices[i].music) stopVoice(voices[i]);
-            }
+            // Scheduled melody notes were previously left running: stop every
+            // live voice, music included, then silence the master gain so notes
+            // already handed to Web Audio contribute nothing even if a stop is
+            // refused.
+            setMasterGain(0);
+            const t = now();
+            for (let i = voices.length - 1; i >= 0; i--) stopVoice(voices[i], t);
           } else {
-            // Unmuting re-arms the loop; the next update() resumes scheduling.
+            setMasterGain(MASTER_GAIN);
+            // Unmuting re-arms the loop; the next update() resumes scheduling
+            // from the current time, so missed notes never arrive as a burst.
             stopMusic();
           }
         } catch (e) {

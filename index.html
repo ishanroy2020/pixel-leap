@@ -65,6 +65,7 @@
 <div id="safe-area" aria-hidden="true"></div>
 <script src="game.js"></script>
 <script src="controls.js"></script>
+<script src="screens.js"></script>
 <script>
 "use strict";
 (function () {
@@ -529,9 +530,6 @@
     ctx.fillText(str, Math.round(gx), Math.round(gy));
     ctx.restore();
   }
-  function center(str, gy, size, color) {
-    text(str, view.width / 2, gy, size, color, "center");
-  }
   function hud() {
     var name = (PixelLeap.LEVELS[state.level] || { name: "?" }).name;
     var t = Math.max(0, Math.ceil(state.time));
@@ -568,22 +566,9 @@
     text("TIME " + mm + ":" + ss, rx, midY, 8, t <= 30 ? "#ff8a7a" : "#ffffff", "right");
     text(name.toUpperCase() + " " + (state.level + 1) + "/3", rx, topY, 8, "#ffe66a", "right");
   }
-  function overlayScreen(lines) {
-    ctx.fillStyle = "rgba(6, 8, 20, 0.72)";
-    ctx.fillRect(0, 0, view.width, view.height);
-    var total = 0;
-    for (var j = 0; j < lines.length; j++) total += (lines[j].size || 8) + 8;
-    var gy = Math.round((view.height - total) / 2);
-    for (var i = 0; i < lines.length; i++) {
-      var ln = lines[i];
-      center(ln.s, gy, ln.size || 8, ln.color || "#ffffff");
-      gy += (ln.size || 8) + 8;
-    }
-  }
-
   /* ---------- main loop ---------- */
-  var screen = "title";
-  var paused = false;
+  var flow = PixelScreens.createFlow();
+  var best = PixelScreens.loadBest();
   var last = 0;
   var acc = 0;
   var STEP = 1 / 60;
@@ -597,18 +582,12 @@
     /* stage 2b reads this queue for sound effects; keep it bounded */
     if (events.length > 64) events.splice(0, events.length - 64);
   }
-  function startGame() {
+  function newGame() {
     state = PixelLeap.createGame({ level: 0, lives: 3 });
     state.viewWidth = view.width;
-    screen = "playing";
-    paused = false;
     acc = 0;
     events.length = 0;
-  }
-  function pressEnter() {
-    if (screen === "title" || !state) { startGame(); return; }
-    if (state.mode === "levelclear") { PixelLeap.nextLevel(state); drainEvents(); }
-    else if (state.mode === "gameover" || state.mode === "won") { PixelLeap.restart(state); drainEvents(); }
+    drainEvents();
   }
 
   function draw() {
@@ -632,47 +611,36 @@
       ctx.restore();
     }
   }
+  function levelName() {
+    return (PixelLeap.LEVELS[state.level] || { name: "?" }).name;
+  }
   function drawScene() {
-    if (screen === "title" || !state) {
+    if (!state || flow.screen === "title") {
       drawBackdrop("meadow", 0);
       blit(pipRows(1, false, false), Math.round(view.width / 2) - 6, Math.round(view.height / 2) + 22, PAL_PIP, false);
-      overlayScreen([
-        { s: "PIXEL LEAP", size: 16, color: "#7ef3ff" },
-        { s: "ARROWS OR A D  MOVE", size: 8, color: "#ffffff" },
-        { s: "SPACE OR W JUMPS", size: 8, color: "#ffffff" },
-        { s: "press Enter", size: 8, color: "#ffe66a" }
-      ]);
-      return;
+    } else {
+      drawBackdrop(theme(), state.camera.x);
+      drawTiles();
+      drawEntities();
+      hud();
     }
-    drawBackdrop(theme(), state.camera.x);
-    drawTiles();
-    drawEntities();
-    hud();
-    if (state.mode === "levelclear") {
-      overlayScreen([
-        { s: "LEVEL CLEAR", size: 12, color: "#9dff7a" },
-        { s: "SCORE " + state.score, size: 8, color: "#ffffff" },
-        { s: "press Enter", size: 8, color: "#ffe66a" }
-      ]);
-    } else if (state.mode === "gameover") {
-      overlayScreen([
-        { s: "GAME OVER", size: 12, color: "#ff7a7a" },
-        { s: "SCORE " + state.score, size: 8, color: "#ffffff" },
-        { s: "press Enter", size: 8, color: "#ffe66a" }
-      ]);
-    } else if (state.mode === "won") {
-      overlayScreen([
-        { s: "YOU WIN!", size: 12, color: "#ffe66a" },
-        { s: "SCORE " + state.score, size: 8, color: "#ffffff" },
-        { s: "press Enter", size: 8, color: "#7ef3ff" }
-      ]);
-    }
-    if (paused) {
-      overlayScreen([
-        { s: "PAUSE", size: 12, color: "#ffffff" },
-        { s: "P RESUMES", size: 8, color: "#ffe66a" }
-      ]);
-    }
+    /* Screen flow overlays (title / paused / clear / game over / won) in game px. */
+    PixelScreens.drawScreen(
+      ctx,
+      flow.screen,
+      {
+        score: state ? state.score : 0,
+        best: best,
+        gems: state ? state.gems : 0,
+        lives: state ? state.lives : 0,
+        levelName: state ? levelName() : "LEVEL",
+        muted: false,
+        touch: ctl.touchActive()
+      },
+      view.width,
+      view.height,
+      clock
+    );
   }
 
   function frame(ms) {
@@ -682,26 +650,39 @@
     last = now;
     if (elapsed > 0.25) elapsed = 0.25;
     if (document.hidden) {
-      if (screen === "playing") paused = true;
+      flow.pause();
       ctl.reset();
     } else {
-      if (ctl.consumePause()) {
-        if (screen === "playing") paused = !paused;
+      var act = { action: ctl.consumeAction(), pause: ctl.consumePause() };
+      var result = flow.update(state ? state.mode : "playing", elapsed, act);
+      if (result === "restart") {
+        if (state) PixelLeap.restart(state);
+        else newGame();
+        drainEvents();
+        acc = 0;
+      } else if (result === "nextLevel") {
+        if (state) {
+          PixelLeap.nextLevel(state);
+          drainEvents();
+          acc = 0;
+        }
       }
-      if (ctl.consumeAction()) pressEnter();
-      var playerInput = ctl.input();
+      if (state && (flow.entered === "gameover" || flow.entered === "won")) {
+        best = PixelScreens.saveBest(state.score);
+      }
       clock += elapsed;
-      acc += elapsed;
-      var guard = 0;
-      while (acc >= STEP && guard < 10) {
-        if (screen === "playing" && !paused && state) {
+      if (result === "step") {
+        var playerInput = ctl.input();
+        acc += elapsed;
+        var guard = 0;
+        while (acc >= STEP && guard < 10) {
           PixelLeap.step(state, playerInput, Math.min(STEP, MAX_DT));
           drainEvents();
+          acc -= STEP;
+          guard++;
         }
-        acc -= STEP;
-        guard++;
+        if (guard >= 10) acc = 0;
       }
-      if (guard >= 10) acc = 0;
     }
     draw();
     requestAnimationFrame(frame);
@@ -712,7 +693,10 @@
   document.addEventListener("visibilitychange", function () {
     last = 0;
     acc = 0;
-    if (document.hidden) ctl.reset();
+    if (document.hidden) {
+      flow.pause();
+      ctl.reset();
+    }
   });
 
   /* Single input path: every key and pointer goes through PixelControls. */
@@ -723,6 +707,7 @@
     if (ctl.keyUp(ev.code)) ev.preventDefault();
   });
   window.addEventListener("blur", function () {
+    flow.pause();
     ctl.reset();
   });
 
@@ -755,8 +740,7 @@
   /* Read-only handle for headless verification. */
   window.__pixelLeap = Object.freeze({
     get state() { return state ? JSON.parse(JSON.stringify(state)) : null; },
-    get screen() { return screen; },
-    get paused() { return paused; }
+    get screen() { return flow.screen; }
   });
 })();
 </script>
